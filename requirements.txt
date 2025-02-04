@@ -1,7 +1,6 @@
-pandas
-numpy
-openpyxl
-streamlit
-plotly.express
-yfinance
-numpy_financial
+numpy==1.24.3
+numpy-financial==1.0.0
+pandas==2.1.4
+plotly.express==0.4.1
+streamlit==1.29.0
+yfinance==0.2.36
