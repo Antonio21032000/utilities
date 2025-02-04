@@ -5,7 +5,7 @@ import numpy_financial as npf
 import streamlit as st
 
 # Ler o arquivo Excel definindo a linha 1 como cabeçalho
-irr_dash = pd.read_excel('M:\VS Code\irrdash3.xlsx', header=1)
+irr_dash = pd.read_excel('irrdash3.xlsx', header=1)
 
 # Remover a coluna 'Unnamed: 0' se ela existir
 if 'Unnamed: 0' in irr_dash.columns:
