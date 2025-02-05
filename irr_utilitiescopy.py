@@ -27,20 +27,23 @@ st.markdown("""
         
         /* Container do título personalizado */
         .title-container {
-            background-color: #102E46;
-            padding: 2rem;
-            margin: 2rem 0;
+            background-color: #C98C2E;
+            padding: 1.5rem;
+            margin: 0;
             text-align: center;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
         }
         
         /* Título principal */
         .title-text {
             color: #FFFFFF;
-            font-size: 3.5em;
+            font-size: 2.8em;
             font-weight: bold;
             margin: 0;
             padding: 0;
             font-family: sans-serif;
+            letter-spacing: 1px;
         }
         
         /* Container do título */
