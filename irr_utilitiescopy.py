@@ -37,12 +37,13 @@ st.markdown("""
         
         /* Título principal */
         .title-text {
-            color: #C98C2E;
+            color: #FFFFFF;
             font-size: 4em;
             font-weight: bold;
             margin: 0;
             padding: 0;
             font-family: sans-serif;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
         }
         
         /* Container do título */
