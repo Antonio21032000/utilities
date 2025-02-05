@@ -7,7 +7,7 @@ import plotly.express as px
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico",
+    page_title="Análise de IRR - Setor Elétrico e Malls",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -37,7 +37,7 @@ st.markdown("""
         
         /* Título principal */
         .title-text {
-            color: #FFFFFF;
+            color: white !important;
             font-size: 2.8em;
             font-weight: 600;
             margin: 0;
@@ -61,7 +61,7 @@ st.markdown("""
 
         .stTabs [aria-selected="true"] {
             background-color: rgba(201, 140, 46, 0.2);
-            color: #FFFFFF;
+            color: white;
         }
         
         /* Container do título */
@@ -71,7 +71,7 @@ st.markdown("""
         
         /* Customização de textos */
         .st-emotion-cache-1y4p8pa {
-            color: #FFFFFF;
+            color: white;
         }
         
         /* Remover marca d'água do Streamlit */
@@ -99,13 +99,18 @@ st.markdown("""
         .st-emotion-cache-1629p8f {
             display: none;
         }
+
+        /* Forçar texto branco no título */
+        h1.title-text {
+            color: white !important;
+        }
     </style>
 """, unsafe_allow_html=True)
 
 # Título personalizado com HTML/CSS
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text">Análise de IRR - Setor Elétrico e Malls</h1>
+        <h1 class="title-text" style="color: white !important;">Análise de IRR - Setor Elétrico e Malls</h1>
     </div>
 """, unsafe_allow_html=True)
 
