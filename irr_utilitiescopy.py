@@ -250,5 +250,3 @@ with tab1:
     # Exibir o gráfico no Streamlit com margens personalizadas
     st.plotly_chart(fig, use_container_width=True)
 
-with tab2:
-    st.write("Aqui será adicionado o gráfico de duration...")
