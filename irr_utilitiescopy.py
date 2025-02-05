@@ -129,7 +129,12 @@ fig = px.bar(
     y='IRR',
     title='IRR por Empresa',
     color_discrete_sequence=[STK_AZUL],
-    text_auto='.2f'  # Adiciona os valores em cima das barras com 2 casas decimais
+)
+
+# Adicionar os valores em cima das barras
+fig.update_traces(
+    text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
+    textposition='outside',
 )
 
 # Personalizar o layout do gráfico
@@ -141,8 +146,6 @@ fig.update_layout(
     title_font_size=24,
     showlegend=False,
     height=600,
-    uniformtext_minsize=12,  # Tamanho mínimo do texto
-    uniformtext_mode='hide'  # Esconde o texto se não couber
 )
 
 # Personalizar os eixos
@@ -159,16 +162,6 @@ fig.update_yaxes(
     tickfont_color=STK_AZUL,
     gridcolor='lightgray',
     tickformat='.2f'
-)
-
-# Personalizar o texto em cima das barras
-fig.update_traces(
-    textfont=dict(
-        color='white',  # Cor do texto
-        size=12  # Tamanho da fonte
-    ),
-    textposition='inside',  # Posição do texto dentro da barra
-    texttemplate='%{text}%'  # Adiciona o símbolo de % após o número
 )
 
 # Exibir o gráfico no Streamlit
