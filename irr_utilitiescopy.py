@@ -199,6 +199,11 @@ with tab1:
 
     # Criar DataFrame com os valores de IRR
     irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
+    
+    # Ordenar o DataFrame pelo IRR antes de multiplicar por 100
+    irr_df = irr_df.sort_values('IRR', ascending=True).reset_index(drop=True)
+    
+    # Criar versão para o plot com valores em percentagem
     irr_df_plot = irr_df.copy()
     irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100
 
