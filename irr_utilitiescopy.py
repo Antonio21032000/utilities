@@ -186,7 +186,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Título
-st.title("Análise de IRR - Setor Elétrico")
+st.title("Análise de IRR - Setor Elétrico e Malls")
 
 # Criar gráfico de barras com Plotly
 fig = px.bar(
