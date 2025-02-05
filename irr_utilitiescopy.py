@@ -110,7 +110,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Criar tabs
-tab1, tab2 = st.tabs(["IRR por Empresa", "Análise Adicional"])
+tab1, tab2 = st.tabs(["IRR por Empresa", "Análise com duration"])
 
 with tab1:
     # Ler o arquivo Excel definindo a linha 1 como cabeçalho
@@ -241,4 +241,3 @@ with tab1:
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.write("Aqui será adicionado o novo gráfico...")
