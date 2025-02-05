@@ -39,11 +39,29 @@ st.markdown("""
         .title-text {
             color: #FFFFFF;
             font-size: 2.8em;
-            font-weight: bold;
+            font-weight: 600;
             margin: 0;
             padding: 0;
             font-family: sans-serif;
             letter-spacing: 1px;
+        }
+        
+        /* Estilização das tabs */
+        .stTabs [data-baseweb="tab-list"] {
+            gap: 2px;
+            background-color: #102E46;
+        }
+
+        .stTabs [data-baseweb="tab"] {
+            color: #C98C2E;
+            background-color: rgba(201, 140, 46, 0.1);
+            padding: 10px 20px;
+            border-radius: 5px 5px 0 0;
+        }
+
+        .stTabs [aria-selected="true"] {
+            background-color: rgba(201, 140, 46, 0.2);
+            color: #FFFFFF;
         }
         
         /* Container do título */
@@ -91,129 +109,136 @@ st.markdown("""
     </div>
 """, unsafe_allow_html=True)
 
-# Ler o arquivo Excel definindo a linha 1 como cabeçalho
-irr_dash = pd.read_excel('irrdash3.xlsx', header=1)
+# Criar tabs
+tab1, tab2 = st.tabs(["IRR por Empresa", "Análise Adicional"])
 
-# Remover a coluna 'Unnamed: 0' se ela existir
-if 'Unnamed: 0' in irr_dash.columns:
-    irr_dash = irr_dash.drop('Unnamed: 0', axis=1)
+with tab1:
+    # Ler o arquivo Excel definindo a linha 1 como cabeçalho
+    irr_dash = pd.read_excel('irrdash3.xlsx', header=1)
 
-# Definir o ticker da empresa
-ticker_symbol = "CPLE6.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_cple6 = market_cap / 1e6*-1
+    # Remover a coluna 'Unnamed: 0' se ela existir
+    if 'Unnamed: 0' in irr_dash.columns:
+        irr_dash = irr_dash.drop('Unnamed: 0', axis=1)
 
-# EQTL3
-ticker_symbol = "EQTL3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_eqtl3 = market_cap / 1e6*-1
+    # Definir o ticker da empresa
+    ticker_symbol = "CPLE6.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_cple6 = market_cap / 1e6*-1
 
-# ENGI11
-ticker_symbol = "ENGI11.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_engi11 = market_cap / 1e6*-1
+    # EQTL3
+    ticker_symbol = "EQTL3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_eqtl3 = market_cap / 1e6*-1
 
-# SBSP3
-ticker_symbol = "SBSP3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_sbsp3 = market_cap / 1e6*-1
+    # ENGI11
+    ticker_symbol = "ENGI11.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_engi11 = market_cap / 1e6*-1
 
-# NEOE3
-ticker_symbol = "NEOE3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_neoe3 = market_cap / 1e6*-1
+    # SBSP3
+    ticker_symbol = "SBSP3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_sbsp3 = market_cap / 1e6*-1
 
-# ENEV3
-ticker_symbol = "ENEV3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_enev3 = market_cap / 1e6*-1
+    # NEOE3
+    ticker_symbol = "NEOE3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_neoe3 = market_cap / 1e6*-1
 
-# ELET3
-ticker_symbol = "ELET3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_elet3 = market_cap / 1e6*-1
+    # ENEV3
+    ticker_symbol = "ENEV3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_enev3 = market_cap / 1e6*-1
 
-# EGIE3
-ticker_symbol = "EGIE3.SA"
-ticker = yf.Ticker(ticker_symbol)
-market_cap = ticker.info.get("marketCap")
-market_cap_egie3 = market_cap / 1e6*-1
+    # ELET3
+    ticker_symbol = "ELET3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_elet3 = market_cap / 1e6*-1
 
-# Transformar irr_dash em dataframe
-irr_dash = pd.DataFrame(irr_dash)
+    # EGIE3
+    ticker_symbol = "EGIE3.SA"
+    ticker = yf.Ticker(ticker_symbol)
+    market_cap = ticker.info.get("marketCap")
+    market_cap_egie3 = market_cap / 1e6*-1
 
-# Preenche a linha que está com NaN com o valor da variavel market_cap
-irr_dash.at[0, "CPLE6"] = market_cap_cple6
-irr_dash.at[0, "EQTL3"] = market_cap_eqtl3
-irr_dash.at[0, "ENGI11"] = market_cap_engi11
-irr_dash.at[0, "SBSP3"] = market_cap_sbsp3
-irr_dash.at[0, "NEOE3"] = market_cap_neoe3
-irr_dash.at[0, "ENEV3"] = market_cap_enev3
-irr_dash.at[0, "ELET3"] = market_cap_elet3
-irr_dash.at[0, "EGIE3"] = market_cap_egie3
+    # Transformar irr_dash em dataframe
+    irr_dash = pd.DataFrame(irr_dash)
 
-# Data atual
-data_atual = pd.Timestamp.now().strftime('%d/%m/%Y')
-irr_dash.at[0, "Year"] = data_atual
+    # Preenche a linha que está com NaN com o valor da variavel market_cap
+    irr_dash.at[0, "CPLE6"] = market_cap_cple6
+    irr_dash.at[0, "EQTL3"] = market_cap_eqtl3
+    irr_dash.at[0, "ENGI11"] = market_cap_engi11
+    irr_dash.at[0, "SBSP3"] = market_cap_sbsp3
+    irr_dash.at[0, "NEOE3"] = market_cap_neoe3
+    irr_dash.at[0, "ENEV3"] = market_cap_enev3
+    irr_dash.at[0, "ELET3"] = market_cap_elet3
+    irr_dash.at[0, "EGIE3"] = market_cap_egie3
 
-# Calcular IRR para todas as empresas
-irr_dict = {}
-for empresa in ["CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3"]:
-    cashflows = irr_dash[empresa].dropna().astype(float).tolist()
-    irr_value = npf.irr(cashflows)
-    irr_dict[empresa] = irr_value
+    # Data atual
+    data_atual = pd.Timestamp.now().strftime('%d/%m/%Y')
+    irr_dash.at[0, "Year"] = data_atual
 
-# Criar DataFrame com os valores de IRR
-irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
-irr_df_plot = irr_df.copy()
-irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100
+    # Calcular IRR para todas as empresas
+    irr_dict = {}
+    for empresa in ["CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3"]:
+        cashflows = irr_dash[empresa].dropna().astype(float).tolist()
+        irr_value = npf.irr(cashflows)
+        irr_dict[empresa] = irr_value
 
-# Criar gráfico de barras com Plotly
-fig = px.bar(
-    irr_df_plot,
-    x='Empresa',
-    y='IRR',
-    color_discrete_sequence=[STK_DOURADO]
-)
+    # Criar DataFrame com os valores de IRR
+    irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
+    irr_df_plot = irr_df.copy()
+    irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100
 
-# Adicionar os valores em cima das barras
-fig.update_traces(
-    text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
-    textposition='outside',
-    textfont=dict(color=STK_DOURADO)
-)
-
-# Personalizar o layout do gráfico
-fig.update_layout(
-    plot_bgcolor=STK_AZUL,
-    paper_bgcolor=STK_AZUL,
-    font_color=STK_DOURADO,
-    showlegend=False,
-    height=700,
-    margin=dict(t=50, b=50, l=50, r=50),
-    xaxis=dict(
-        title="Empresas",
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        tickfont=dict(color=STK_DOURADO, size=14),
-        title_font=dict(color=STK_DOURADO, size=16)
-    ),
-    yaxis=dict(
-        title="IRR (%)",
-        showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',
-        tickfont=dict(color=STK_DOURADO, size=14),
-        tickformat='.2f',
-        title_font=dict(color=STK_DOURADO, size=16)
+    # Criar gráfico de barras com Plotly
+    fig = px.bar(
+        irr_df_plot,
+        x='Empresa',
+        y='IRR',
+        color_discrete_sequence=[STK_DOURADO]
     )
-)
 
-# Exibir o gráfico no Streamlit com margens personalizadas
-st.plotly_chart(fig, use_container_width=True)
+    # Adicionar os valores em cima das barras
+    fig.update_traces(
+        text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
+        textposition='outside',
+        textfont=dict(color=STK_DOURADO)
+    )
+
+    # Personalizar o layout do gráfico
+    fig.update_layout(
+        plot_bgcolor=STK_AZUL,
+        paper_bgcolor=STK_AZUL,
+        font_color=STK_DOURADO,
+        showlegend=False,
+        height=700,
+        margin=dict(t=50, b=50, l=50, r=50),
+        xaxis=dict(
+            title="Empresas",
+            showgrid=True,
+            gridcolor='rgba(255, 255, 255, 0.1)',
+            tickfont=dict(color=STK_DOURADO, size=14),
+            title_font=dict(color=STK_DOURADO, size=16)
+        ),
+        yaxis=dict(
+            title="IRR (%)",
+            showgrid=True,
+            gridcolor='rgba(255, 255, 255, 0.1)',
+            tickfont=dict(color=STK_DOURADO, size=14),
+            tickformat='.2f',
+            title_font=dict(color=STK_DOURADO, size=16)
+        )
+    )
+
+    # Exibir o gráfico no Streamlit com margens personalizadas
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.write("Aqui será adicionado o novo gráfico...")
