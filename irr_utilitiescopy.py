@@ -3,6 +3,7 @@ import numpy as np
 import yfinance as yf
 import numpy_financial as npf
 import streamlit as st
+import plotly.express as px
 
 # Ler o arquivo Excel definindo a linha 1 como cabeçalho
 irr_dash = pd.read_excel('irrdash3.xlsx', header=1)
@@ -16,8 +17,6 @@ ticker_symbol = "CPLE6.SA"
 ticker = yf.Ticker(ticker_symbol)
 market_cap = ticker.info.get("marketCap")
 market_cap_cple6 = market_cap / 1e6*-1
-
-# faz a mesma coisa para EQTL3, ENGI11, SBSP3, NEOE3, ENEV3, ELET3, EGIE3
 
 # EQTL3
 ticker_symbol = "EQTL3.SA"
@@ -61,12 +60,10 @@ ticker = yf.Ticker(ticker_symbol)
 market_cap = ticker.info.get("marketCap")
 market_cap_egie3 = market_cap / 1e6*-1
 
-
-#transformar irr_dash em dataframe
+# Transformar irr_dash em dataframe
 irr_dash = pd.DataFrame(irr_dash)
 
-# preenche a linha que está com NaN com o valor da variavel market_ca
-
+# Preenche a linha que está com NaN com o valor da variavel market_cap
 irr_dash.at[0, "CPLE6"] = market_cap_cple6
 irr_dash.at[0, "EQTL3"] = market_cap_eqtl3
 irr_dash.at[0, "ENGI11"] = market_cap_engi11
@@ -76,93 +73,30 @@ irr_dash.at[0, "ENEV3"] = market_cap_enev3
 irr_dash.at[0, "ELET3"] = market_cap_elet3
 irr_dash.at[0, "EGIE3"] = market_cap_egie3
 
-# data atual
+# Data atual
 data_atual = pd.Timestamp.now().strftime('%d/%m/%Y')
-
 irr_dash.at[0, "Year"] = data_atual
 
-# calcula a TIR na coluna CPLE6
-
-# Filtrar os fluxos de caixa da coluna 'CPLE6' (removendo possíveis NaN)
-cashflows_cple6 = irr_dash["CPLE6"].dropna().astype(float).tolist()
-# Calcular a TIR (IRR) usando numpy_financial
-irr_value_cple6 = npf.irr(cashflows_cple6)
-
-# EQTL3
-cashflows_eqtl3 = irr_dash["EQTL3"].dropna().astype(float).tolist()
-irr_value_eqtl3 = npf.irr(cashflows_eqtl3)
-
-# ENGI11
-cashflows_engi11 = irr_dash["ENGI11"].dropna().astype(float).tolist()
-irr_value_engi11 = npf.irr(cashflows_engi11)
-
-# SBSP3
-cashflows_sbsp3 = irr_dash["SBSP3"].dropna().astype(float).tolist()
-irr_value_sbsp3 = npf.irr(cashflows_sbsp3)
-
-# NEOE3
-cashflows_neoe3 = irr_dash["NEOE3"].dropna().astype(float).tolist()
-irr_value_neoe3 = npf.irr(cashflows_neoe3)
-
-# ENEV3
-cashflows_enev3 = irr_dash["ENEV3"].dropna().astype(float).tolist()
-irr_value_enev3 = npf.irr(cashflows_enev3)
-
-# ELET3
-cashflows_elet3 = irr_dash["ELET3"].dropna().astype(float).tolist()
-irr_value_elet3 = npf.irr(cashflows_elet3)
-
-# EGIE3
-cashflows_egie3 = irr_dash["EGIE3"].dropna().astype(float).tolist()
-irr_value_egie3 = npf.irr(cashflows_egie3)
-
-# Imprimir os resultados
-print(f"TIR CPLE6: {irr_value_cple6:.2%}")
-print(f"TIR EQTL3: {irr_value_eqtl3:.2%}")
-print(f"TIR ENGI11: {irr_value_engi11:.2%}")
-print(f"TIR SBSP3: {irr_value_sbsp3:.2%}")
-print(f"TIR NEOE3: {irr_value_neoe3:.2%}")
-print(f"TIR ENEV3: {irr_value_enev3:.2%}")
-print(f"TIR ELET3: {irr_value_elet3:.2%}")
-print(f"TIR EGIE3: {irr_value_egie3:.2%}")
-
-# Criar dicionário com os valores de IRR
-irr_dict = {
-    'CPLE6': irr_value_cple6,
-    'EQTL3': irr_value_eqtl3,
-    'ENGI11': irr_value_engi11,
-    'SBSP3': irr_value_sbsp3,
-    'NEOE3': irr_value_neoe3,
-    'ENEV3': irr_value_enev3,
-    'ELET3': irr_value_elet3,
-    'EGIE3': irr_value_egie3
-}
+# Calcular IRR para todas as empresas
+irr_dict = {}
+for empresa in ["CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3"]:
+    cashflows = irr_dash[empresa].dropna().astype(float).tolist()
+    irr_value = npf.irr(cashflows)
+    irr_dict[empresa] = irr_value
 
 # Criar DataFrame com os valores de IRR
 irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
 
-# Formatar a coluna IRR como percentagem
+# Criar versão não formatada do DataFrame para o gráfico
+irr_df_plot = irr_df.copy()
+irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100  # Converter para percentagem
+
+# Formatar a coluna IRR como percentagem para exibição na tabela
 irr_df['IRR'] = irr_df['IRR'].apply(lambda x: f"{x:.2%}")
 
-# Ordenar o DataFrame pelo valor do IRR (opcional)
-# irr_df = irr_df.sort_values('IRR', ascending=False)
-
-# Exibir o DataFrame
-print("\nDataFrame com valores de IRR:")
-print(irr_df)
-
-
-# streamlit
-
-
-
-import streamlit as st
-import plotly.express as px
-import pandas as pd
-
-# Configurar página do Streamlit com as cores da STK
+# Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico e Malls",
+    page_title="Análise de IRR - Setor Elétrico",
     layout="wide"
 )
 
@@ -186,11 +120,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # Título
-st.title("Análise de IRR - Setor Elétrico e Malls")
+st.title("Análise de IRR - Setor Elétrico")
 
-# Criar gráfico de barras com Plotly
+# Criar gráfico de barras com Plotly usando o DataFrame não formatado
 fig = px.bar(
-    irr_df,
+    irr_df_plot,
     x='Empresa',
     y='IRR',
     title='IRR por Empresa',
@@ -221,7 +155,7 @@ fig.update_yaxes(
     title_font_color=STK_AZUL,
     tickfont_color=STK_AZUL,
     gridcolor='lightgray',
-    tickformat='.2%'
+    tickformat='.2f'  # Mostrar 2 casas decimais
 )
 
 # Exibir o gráfico no Streamlit
