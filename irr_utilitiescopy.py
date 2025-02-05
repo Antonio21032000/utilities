@@ -5,6 +5,61 @@ import numpy_financial as npf
 import streamlit as st
 import plotly.express as px
 
+# Configurar página do Streamlit
+st.set_page_config(
+    page_title="Análise de IRR - Setor Elétrico",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
+
+# Definir as cores da STK
+STK_AZUL = "#102E46"
+STK_DOURADO = "#C98C2E"
+STK_BRANCO = "#FFFFFF"
+
+# Estilo CSS personalizado com fundo azul escuro
+st.markdown("""
+    <style>
+        /* Fundo principal */
+        .stApp {
+            background-color: #102E46;
+        }
+        
+        /* Título principal */
+        .st-emotion-cache-1629p8f h1 {
+            color: #C98C2E !important;
+            text-align: center;
+            padding: 20px;
+            font-size: 2.5em;
+            font-weight: bold;
+            background-color: #102E46;
+        }
+        
+        /* Container do título */
+        div[data-testid="stHeader"] {
+            background-color: #102E46;
+        }
+        
+        /* Customização de textos */
+        .st-emotion-cache-1y4p8pa {
+            color: #FFFFFF;
+        }
+        
+        /* Remover marca d'água do Streamlit */
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        
+        /* Estilo para o container do gráfico */
+        .plot-container {
+            background-color: #102E46;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+    </style>
+""", unsafe_allow_html=True)
+
 # Ler o arquivo Excel definindo a linha 1 como cabeçalho
 irr_dash = pd.read_excel('irrdash3.xlsx', header=1)
 
@@ -86,92 +141,50 @@ for empresa in ["CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3", "ENEV3", "ELET3", 
 
 # Criar DataFrame com os valores de IRR
 irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
-
-# Criar versão não formatada do DataFrame para o gráfico
 irr_df_plot = irr_df.copy()
-irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100  # Converter para percentagem
+irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100
 
-# Formatar a coluna IRR como percentagem para exibição na tabela
-irr_df['IRR'] = irr_df['IRR'].apply(lambda x: f"{x:.2%}")
-
-# Configurar página do Streamlit
-st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico",
-    layout="wide"
-)
-
-# Definir as cores da STK
-STK_AZUL = "#102E46"
-STK_DOURADO = "#C98C2E"
-
-# Estilo CSS personalizado
-st.markdown("""
-    <style>
-    .stApp {
-        background-color: white;
-    }
-    .stHeader {
-        background-color: #102E46;
-    }
-    .st-emotion-cache-1629p8f h1 {
-        color: #102E46;
-    }
-    </style>
-""", unsafe_allow_html=True)
-
-# Título
+# Título centralizado com cor dourada
 st.title("Análise de IRR - Setor Elétrico")
 
-# Criar gráfico de barras com Plotly usando o DataFrame não formatado
+# Criar gráfico de barras com Plotly
 fig = px.bar(
     irr_df_plot,
     x='Empresa',
     y='IRR',
     title='IRR por Empresa',
-    color_discrete_sequence=[STK_AZUL],
+    color_discrete_sequence=[STK_DOURADO]  # Usar dourado para as barras
 )
 
 # Adicionar os valores em cima das barras
 fig.update_traces(
     text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
     textposition='outside',
+    textfont=dict(color=STK_DOURADO)  # Texto em dourado
 )
 
 # Personalizar o layout do gráfico
 fig.update_layout(
-    plot_bgcolor='white',
-    paper_bgcolor='white',
-    font_color=STK_AZUL,
-    title_font_color=STK_AZUL,
+    plot_bgcolor=STK_AZUL,  # Fundo do gráfico em azul
+    paper_bgcolor=STK_AZUL,  # Fundo do papel em azul
+    font_color=STK_DOURADO,  # Cor da fonte em dourado
+    title_font_color=STK_DOURADO,  # Cor do título em dourado
     title_font_size=24,
     showlegend=False,
     height=600,
-)
-
-# Personalizar os eixos
-fig.update_xaxes(
-    title_text='Empresas',
-    title_font_color=STK_AZUL,
-    tickfont_color=STK_AZUL,
-    gridcolor='lightgray'
-)
-
-fig.update_yaxes(
-    title_text='IRR (%)',
-    title_font_color=STK_AZUL,
-    tickfont_color=STK_AZUL,
-    gridcolor='lightgray',
-    tickformat='.2f'
+    margin=dict(t=100, b=50, l=50, r=50),  # Ajustar margens
+    xaxis=dict(
+        showgrid=True,
+        gridcolor='rgba(255, 255, 255, 0.1)',  # Grade mais suave
+        tickfont=dict(color=STK_DOURADO)
+    ),
+    yaxis=dict(
+        showgrid=True,
+        gridcolor='rgba(255, 255, 255, 0.1)',  # Grade mais suave
+        tickfont=dict(color=STK_DOURADO),
+        tickformat='.2f'
+    )
 )
 
 # Exibir o gráfico no Streamlit
 st.plotly_chart(fig, use_container_width=True)
-
-# Exibir o DataFrame abaixo do gráfico
-st.subheader("Dados Detalhados")
-st.dataframe(
-    irr_df.style.set_properties(**{
-        'background-color': 'white',
-        'color': STK_AZUL
-    })
-)
