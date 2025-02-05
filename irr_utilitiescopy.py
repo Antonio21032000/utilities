@@ -29,10 +29,11 @@ st.markdown("""
         .st-emotion-cache-1629p8f h1 {
             color: #C98C2E !important;
             text-align: center;
-            padding: 20px;
-            font-size: 2.5em;
+            padding: 40px 0;
+            font-size: 3.5em !important;
             font-weight: bold;
             background-color: #102E46;
+            margin-bottom: 40px;
         }
         
         /* Container do título */
@@ -56,6 +57,14 @@ st.markdown("""
             padding: 20px;
             border-radius: 10px;
             margin: 20px 0;
+        }
+
+        /* Centralizar o conteúdo */
+        .block-container {
+            padding-top: 0rem;
+            padding-bottom: 0rem;
+            padding-left: 5rem;
+            padding-right: 5rem;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -152,39 +161,40 @@ fig = px.bar(
     irr_df_plot,
     x='Empresa',
     y='IRR',
-    title='IRR por Empresa',
-    color_discrete_sequence=[STK_DOURADO]  # Usar dourado para as barras
+    color_discrete_sequence=[STK_DOURADO]
 )
 
 # Adicionar os valores em cima das barras
 fig.update_traces(
     text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
     textposition='outside',
-    textfont=dict(color=STK_DOURADO)  # Texto em dourado
+    textfont=dict(color=STK_DOURADO)
 )
 
 # Personalizar o layout do gráfico
 fig.update_layout(
-    plot_bgcolor=STK_AZUL,  # Fundo do gráfico em azul
-    paper_bgcolor=STK_AZUL,  # Fundo do papel em azul
-    font_color=STK_DOURADO,  # Cor da fonte em dourado
-    title_font_color=STK_DOURADO,  # Cor do título em dourado
-    title_font_size=24,
+    plot_bgcolor=STK_AZUL,
+    paper_bgcolor=STK_AZUL,
+    font_color=STK_DOURADO,
     showlegend=False,
-    height=600,
-    margin=dict(t=100, b=50, l=50, r=50),  # Ajustar margens
+    height=700,
+    margin=dict(t=50, b=50, l=50, r=50),
     xaxis=dict(
+        title="Empresas",
         showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',  # Grade mais suave
-        tickfont=dict(color=STK_DOURADO)
+        gridcolor='rgba(255, 255, 255, 0.1)',
+        tickfont=dict(color=STK_DOURADO, size=14),
+        title_font=dict(color=STK_DOURADO, size=16)
     ),
     yaxis=dict(
+        title="IRR (%)",
         showgrid=True,
-        gridcolor='rgba(255, 255, 255, 0.1)',  # Grade mais suave
-        tickfont=dict(color=STK_DOURADO),
-        tickformat='.2f'
+        gridcolor='rgba(255, 255, 255, 0.1)',
+        tickfont=dict(color=STK_DOURADO, size=14),
+        tickformat='.2f',
+        title_font=dict(color=STK_DOURADO, size=16)
     )
 )
 
-# Exibir o gráfico no Streamlit
+# Exibir o gráfico no Streamlit com margens personalizadas
 st.plotly_chart(fig, use_container_width=True)
