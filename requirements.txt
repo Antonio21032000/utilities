@@ -1,7 +1,7 @@
 pandas
 numpy
 yfinance
-numpy-financial
+numpy_financial
 streamlit
 plotly
 openpyxl
