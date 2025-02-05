@@ -162,7 +162,7 @@ import pandas as pd
 
 # Configurar página do Streamlit com as cores da STK
 st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico",
+    page_title="Análise de IRR - Setor Elétrico e Malls",
     layout="wide"
 )
 
