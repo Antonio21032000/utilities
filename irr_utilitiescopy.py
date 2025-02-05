@@ -7,7 +7,7 @@ import plotly.express as px
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico",
+    page_title="Análise de IRR - Setor Elétrico e Malls",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
