@@ -25,15 +25,24 @@ st.markdown("""
             background-color: #102E46;
         }
         
-        /* Título principal */
-        .st-emotion-cache-1629p8f h1 {
-            color: #C98C2E !important;
+        /* Container do título personalizado */
+        .title-container {
+            background: linear-gradient(90deg, rgba(201,140,46,0.1) 0%, rgba(201,140,46,0.2) 50%, rgba(201,140,46,0.1) 100%);
+            padding: 2rem;
+            border-radius: 10px;
+            margin: 2rem 0;
             text-align: center;
-            padding: 40px 0;
-            font-size: 3.5em !important;
+            border: 1px solid rgba(201,140,46,0.3);
+        }
+        
+        /* Título principal */
+        .title-text {
+            color: #C98C2E;
+            font-size: 4em;
             font-weight: bold;
-            background-color: #102E46;
-            margin-bottom: 40px;
+            margin: 0;
+            padding: 0;
+            font-family: sans-serif;
         }
         
         /* Container do título */
@@ -66,7 +75,19 @@ st.markdown("""
             padding-left: 5rem;
             padding-right: 5rem;
         }
+        
+        /* Esconder o título padrão do Streamlit */
+        .st-emotion-cache-1629p8f {
+            display: none;
+        }
     </style>
+""", unsafe_allow_html=True)
+
+# Título personalizado com HTML/CSS
+st.markdown("""
+    <div class="title-container">
+        <h1 class="title-text">Análise de IRR - Setor Elétrico</h1>
+    </div>
 """, unsafe_allow_html=True)
 
 # Ler o arquivo Excel definindo a linha 1 como cabeçalho
@@ -152,9 +173,6 @@ for empresa in ["CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3", "ENEV3", "ELET3", 
 irr_df = pd.DataFrame(list(irr_dict.items()), columns=['Empresa', 'IRR'])
 irr_df_plot = irr_df.copy()
 irr_df_plot['IRR'] = irr_df_plot['IRR'] * 100
-
-# Título centralizado com cor dourada
-st.title("Análise de IRR - Setor Elétrico")
 
 # Criar gráfico de barras com Plotly
 fig = px.bar(
