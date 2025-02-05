@@ -105,7 +105,7 @@ st.markdown("""
 # Título personalizado com HTML/CSS
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text">Análise de IRR - Setor Elétrico</h1>
+        <h1 class="title-text">Análise de IRR - Setor Elétrico e Malls</h1>
     </div>
 """, unsafe_allow_html=True)
 
