@@ -7,7 +7,7 @@ import plotly.express as px
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Setor Elétrico e Malls",
+    page_title="Análise de IRR - Setor Elétrico",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -209,14 +209,14 @@ with tab1:
     fig.update_traces(
         text=irr_df_plot['IRR'].apply(lambda x: f'{x:.2f}%'),
         textposition='outside',
-        textfont=dict(color=STK_DOURADO)
+        textfont=dict(color='white', size=14)
     )
 
     # Personalizar o layout do gráfico
     fig.update_layout(
         plot_bgcolor=STK_AZUL,
         paper_bgcolor=STK_AZUL,
-        font_color=STK_DOURADO,
+        font_color='white',
         showlegend=False,
         height=700,
         margin=dict(t=50, b=50, l=50, r=50),
@@ -224,18 +224,21 @@ with tab1:
             title="Empresas",
             showgrid=True,
             gridcolor='rgba(255, 255, 255, 0.1)',
-            tickfont=dict(color=STK_DOURADO, size=14),
-            title_font=dict(color=STK_DOURADO, size=16)
+            tickfont=dict(color='white', size=14),
+            title_font=dict(color='white', size=16)
         ),
         yaxis=dict(
             title="IRR (%)",
             showgrid=True,
             gridcolor='rgba(255, 255, 255, 0.1)',
-            tickfont=dict(color=STK_DOURADO, size=14),
+            tickfont=dict(color='white', size=14),
             tickformat='.2f',
-            title_font=dict(color=STK_DOURADO, size=16)
+            title_font=dict(color='white', size=16)
         )
     )
 
     # Exibir o gráfico no Streamlit com margens personalizadas
     st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.write("Aqui será adicionado o gráfico de duration...")
