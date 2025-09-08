@@ -13,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR",
+    page_title="Análise de IRR - Empresas B3",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -244,15 +244,15 @@ try:
         st.plotly_chart(fig_irr, use_container_width=True)
         
     else:
-        st.error("Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
+        st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
 except FileNotFoundError:
-    st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
+    st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
 
-# Rodapé
+# Rodapé com melhor visibilidade
 st.markdown("---")
-st.markdown(f"**Última atualização:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+st.markdown(f"<p style='color: white; text-align: center;'><strong>Última atualização:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>", unsafe_allow_html=True)
 
 
