@@ -106,7 +106,7 @@ st.markdown("""
 # Título personalizado
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text" style="color: white !important;">Análise de IRR - Empresas B3</h1>
+        <h1 class="title-text" style="color: white !important;">Análise de IRR</h1>
     </div>
 """, unsafe_allow_html=True)
 
@@ -291,4 +291,5 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
+
 
