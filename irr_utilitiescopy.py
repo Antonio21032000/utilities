@@ -14,9 +14,9 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Calculadora de IRR - Empresas B3",
+    page_title="Análise de IRR - Empresas B3",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
 # Definir as cores da STK
@@ -83,7 +83,7 @@ st.markdown("""
 # Título personalizado
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text" style="color: white !important;">Calculadora de IRR - Empresas B3</h1>
+        <h1 class="title-text" style="color: white !important;">Análise de IRR - Empresas B3</h1>
     </div>
 """, unsafe_allow_html=True)
 
@@ -123,272 +123,220 @@ def compute_irr(cashflows: np.ndarray) -> float:
             low, f_low = mid, f_mid
     return mid
 
-# Função para converter market cap para primeiros dígitos em milhões
+# Função para converter market cap
 def cap_to_first_digits_mln(value, digits=6):
     if pd.isna(value):
         return pd.NA
     total_mln = round(value / 1e6)
     return int(str(int(total_mln))[:digits])
 
-# Sidebar para configurações
-st.sidebar.header("Configurações")
+# Executar o código principal
+try:
+    with st.spinner("Carregando dados e calculando IRR..."):
+        
+        # Buscar preços de fechamento para múltiplos tickers da B3
+        tickers = [
+            "CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3",
+            "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3",
+            "IGTI11"
+        ]
 
-# Lista de tickers
-default_tickers = [
-    "CPLE6", "EQTL3", "ENGI11", "SBSP3", "NEOE3",
-    "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3", "IGTI11"
-]
+        # Adiciona sufixo da B3 e baixa os dados
+        tickers_sa = [f"{t}.SA" for t in tickers]
+        closes = yf.download(tickers_sa, period="5d")["Close"]
 
-# Quantidades de ações por ticker
-shares_dict = {
-    "CPLE6": 2982810000,
-    "EQTL3": 1255510000,
-    "ENGI11": 457130458,
-    "SBSP3": 683510000,
-    "NEOE3": 1213800000,
-    "ENEV3": 1936970000,
-    "ELET3": 2308630000,
-    "EGIE3": 815928000,
-    "MULT3": 513164000,
-    "ALOS3": 542937000,
-    "IGTI11": 296728385,
-}
+        # Pega o último preço de fechamento disponível
+        last_close = closes.iloc[-1]
 
-# Seleção de tickers na sidebar
-selected_tickers = st.sidebar.multiselect(
-    "Selecione os tickers:",
-    default_tickers,
-    default=default_tickers[:8]
-)
+        # Renomeia os índices para remover o sufixo ".SA"
+        last_close.index = [t.replace(".SA", "") for t in last_close.index]
 
-# Upload do arquivo Excel
-uploaded_file = st.sidebar.file_uploader(
-    "Upload do arquivo Excel (irrdash3.xlsx)", 
-    type=['xlsx', 'xls']
-)
+        # Converte preços para float (Series)
+        prices = last_close.astype(float)
 
-# Botão para executar análise
-run_analysis = st.sidebar.button("🚀 Executar Análise", type="primary")
+        # Quantidade de ações por ticker (inteiros)
+        shares_dict = {
+            "CPLE6": 2982810000,
+            "EQTL3": 1255510000,
+            "ENGI11": 457130458,
+            "SBSP3": 683510000,
+            "NEOE3": 1213800000,
+            "ENEV3": 1936970000,
+            "ELET3": 2308630000,
+            "EGIE3": 815928000,
+            "MULT3": 513164000,
+            "ALOS3": 542937000,
+            "IGTI11": 296728385,
+        }
 
-# Criar abas
-tab1, tab2, tab3 = st.tabs(["📊 Market Cap", "💰 Análise IRR", "📈 Visualizações"])
+        shares = pd.Series(shares_dict).reindex(prices.index)
 
-if run_analysis and selected_tickers:
-    
-    with st.spinner("Baixando dados do Yahoo Finance..."):
-        try:
-            # Adiciona sufixo da B3 e baixa os dados
-            tickers_sa = [f"{t}.SA" for t in selected_tickers]
-            closes = yf.download(tickers_sa, period="5d")["Close"]
+        # Calcula market cap (preço x ações)
+        market_cap = prices * shares
+
+        resultado = pd.DataFrame({
+            "price": prices,
+            "shares": shares,
+            "market_cap": market_cap,
+        })
+
+        # Reduz market_cap para milhões e mantém apenas os 6 primeiros dígitos
+        resultado['market_cap'] = resultado['market_cap'].apply(cap_to_first_digits_mln)
+
+        # PEGA O dataframe do excel irrdash3.xlsx
+        df = pd.read_excel('irrdash3.xlsx')
+
+        # vamos subir a linha 0 como titulo
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
+
+        # garante que as colunas dos tickers existam
+        for t in resultado.index:
+            if t not in df.columns:
+                df[t] = pd.NA
+
+        # escreve os valores na primeira linha de dados usando rótulos
+        target_row = df.index[0]
+        df.loc[target_row, list(resultado.index)] = list(resultado['market_cap'].values)
+
+        # multiplica por -1 a linha do 1 do df
+        df.iloc[0] = df.iloc[0] * -1
+
+        # garante numéricos nas colunas de tickers
+        for t in resultado.index:
+            df[t] = pd.to_numeric(df[t], errors='coerce')
+
+        irr_results = {}
+        for t in resultado.index:
+            series_cf = df[t].dropna()
+            if series_cf.empty:
+                irr_results[t] = np.nan
+                continue
+            # espera-se que a primeira linha seja saída (negativa)
+            irr_results[t] = compute_irr(series_cf.values)
+
+        ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
+
+    # Criar tabs
+    tab1, tab2 = st.tabs(["📊 Market Cap & Dados", "💰 Análise IRR"])
+
+    with tab1:
+        st.subheader("📊 Dados das Empresas")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.write("**Market Cap e Preços:**")
+            display_df = resultado.copy()
+            display_df['market_cap_original'] = display_df['market_cap'] * 1e6  # Volta para valor original
+            display_df['market_cap_formatted'] = display_df['market_cap_original'].apply(lambda x: f"R$ {x:,.0f}" if not pd.isna(x) else "N/A")
+            display_df['price_formatted'] = display_df['price'].apply(lambda x: f"R$ {x:.2f}" if not pd.isna(x) else "N/A")
+            display_df['shares_formatted'] = display_df['shares'].apply(lambda x: f"{x:,}" if not pd.isna(x) else "N/A")
             
-            # Pega o último preço de fechamento disponível
-            if len(selected_tickers) == 1:
-                last_close = pd.Series([closes.iloc[-1]], index=[selected_tickers[0]])
-            else:
-                last_close = closes.iloc[-1]
-                last_close.index = [t.replace(".SA", "") for t in last_close.index]
+            st.dataframe(display_df[['price_formatted', 'shares_formatted', 'market_cap_formatted']], use_container_width=True)
+        
+        with col2:
+            # Gráfico de market cap
+            valid_mc = resultado.dropna(subset=['market_cap'])
+            if len(valid_mc) > 0:
+                fig_mc = px.bar(
+                    x=valid_mc.index,
+                    y=valid_mc['market_cap'],
+                    title="Market Cap por Empresa (Milhões R$)",
+                    color_discrete_sequence=[STK_DOURADO]
+                )
+                fig_mc.update_layout(
+                    plot_bgcolor=STK_AZUL,
+                    paper_bgcolor=STK_AZUL,
+                    font_color='white',
+                    xaxis_title="Empresas",
+                    yaxis_title="Market Cap (Milhões R$)"
+                )
+                st.plotly_chart(fig_mc, use_container_width=True)
+
+    with tab2:
+        st.subheader("💰 Análise de IRR (Yield to Maturity)")
+        
+        # Limpar dados inválidos e ordenar
+        ytm_clean = ytm_df.dropna().sort_values('irr', ascending=True)
+        
+        if len(ytm_clean) > 0:
+            col1, col2 = st.columns([1, 2])
             
-            # Converte preços para float
-            prices = last_close.astype(float)
-            
-            # Quantidade de ações por ticker
-            shares = pd.Series({k: v for k, v in shares_dict.items() if k in selected_tickers}).reindex(prices.index)
-            
-            # Calcula market cap
-            market_cap = prices * shares
-            
-            # Cria DataFrame resultado
-            resultado = pd.DataFrame({
-                "price": prices,
-                "shares": shares,
-                "market_cap": market_cap,
-            })
-            
-            # Converte market cap para formato adequado
-            resultado['market_cap_formatted'] = resultado['market_cap'].apply(cap_to_first_digits_mln)
-            
-            # Exibe na aba Market Cap
-            with tab1:
-                st.subheader("📊 Market Cap das Empresas")
+            with col1:
+                st.write("**Resultados de IRR:**")
+                display_irr = ytm_clean.copy()
+                display_irr['irr_percent'] = display_irr['irr'].apply(lambda x: f"{x*100:.2f}%")
+                st.dataframe(display_irr[['irr_percent']], use_container_width=True)
                 
-                col1, col2 = st.columns(2)
+                # Estatísticas
+                st.write("**Estatísticas:**")
+                st.metric("Média", f"{ytm_clean['irr'].mean()*100:.2f}%")
+                st.metric("Mediana", f"{ytm_clean['irr'].median()*100:.2f}%")
+                st.metric("Desvio Padrão", f"{ytm_clean['irr'].std()*100:.2f}%")
+                st.metric("Melhor IRR", f"{ytm_clean['irr'].max()*100:.2f}%")
+                st.metric("Pior IRR", f"{ytm_clean['irr'].min()*100:.2f}%")
+            
+            with col2:
+                # Gráfico principal do ytm_df
+                fig_irr = px.bar(
+                    x=ytm_clean.index,
+                    y=ytm_clean['irr'] * 100,
+                    title="IRR (Yield to Maturity) por Empresa",
+                    color_discrete_sequence=[STK_DOURADO],
+                    text=ytm_clean['irr'].apply(lambda x: f"{x*100:.2f}%")
+                )
                 
-                with col1:
-                    st.write("**Dados Atuais:**")
-                    display_df = resultado.copy()
-                    display_df['market_cap'] = display_df['market_cap'].apply(lambda x: f"R$ {x:,.0f}" if not pd.isna(x) else "N/A")
-                    display_df['price'] = display_df['price'].apply(lambda x: f"R$ {x:.2f}" if not pd.isna(x) else "N/A")
-                    display_df['shares'] = display_df['shares'].apply(lambda x: f"{x:,}" if not pd.isna(x) else "N/A")
-                    st.dataframe(display_df, use_container_width=True)
+                fig_irr.update_traces(
+                    textposition='outside',
+                    textfont=dict(color='white', size=12)
+                )
                 
-                with col2:
-                    # Gráfico de market cap
-                    fig_mc = px.bar(
-                        x=resultado.index,
-                        y=resultado['market_cap']/1e9,  # Em bilhões
-                        title="Market Cap por Empresa (R$ Bilhões)",
-                        color_discrete_sequence=[STK_DOURADO]
+                fig_irr.update_layout(
+                    plot_bgcolor=STK_AZUL,
+                    paper_bgcolor=STK_AZUL,
+                    font_color='white',
+                    xaxis_title="Empresas",
+                    yaxis_title="IRR (%)",
+                    height=500,
+                    showlegend=False,
+                    xaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(255, 255, 255, 0.1)',
+                    ),
+                    yaxis=dict(
+                        showgrid=True,
+                        gridcolor='rgba(255, 255, 255, 0.1)',
                     )
-                    fig_mc.update_layout(
-                        plot_bgcolor=STK_AZUL,
-                        paper_bgcolor=STK_AZUL,
-                        font_color='white',
-                        xaxis_title="Empresas",
-                        yaxis_title="Market Cap (R$ Bilhões)"
-                    )
-                    st.plotly_chart(fig_mc, use_container_width=True)
-            
-            # Processa arquivo Excel se fornecido
-            if uploaded_file is not None:
-                try:
-                    # Lê o arquivo Excel
-                    df = pd.read_excel(uploaded_file)
-                    
-                    # Move a linha 0 como título
-                    df.columns = df.iloc[0]
-                    df = df.iloc[1:]
-                    
-                    # Garante que as colunas dos tickers existam
-                    for t in resultado.index:
-                        if t not in df.columns:
-                            df[t] = pd.NA
-                    
-                    # Escreve os valores na primeira linha usando os market caps
-                    target_row = df.index[0]
-                    df.loc[target_row, list(resultado.index)] = list(resultado['market_cap_formatted'].values)
-                    
-                    # Multiplica por -1 a primeira linha (saída de caixa)
-                    df.iloc[0] = df.iloc[0] * -1
-                    
-                    # Garante que as colunas sejam numéricas
-                    for t in resultado.index:
-                        df[t] = pd.to_numeric(df[t], errors='coerce')
-                    
-                    # Calcula IRR para cada ticker
-                    irr_results = {}
-                    cashflow_details = {}
-                    
-                    for t in resultado.index:
-                        series_cf = df[t].dropna()
-                        if series_cf.empty:
-                            irr_results[t] = np.nan
-                            cashflow_details[t] = []
-                        else:
-                            irr_results[t] = compute_irr(series_cf.values)
-                            cashflow_details[t] = series_cf.values.tolist()
-                    
-                    # Cria DataFrame com resultados
-                    ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
-                    ytm_df = ytm_df.sort_values('irr', ascending=False)
-                    
-                    # Exibe na aba IRR
-                    with tab2:
-                        st.subheader("💰 Análise de IRR")
-                        
-                        col1, col2 = st.columns(2)
-                        
-                        with col1:
-                            st.write("**Resultados de IRR:**")
-                            display_irr = ytm_df.copy()
-                            display_irr['irr_percent'] = display_irr['irr'].apply(
-                                lambda x: f"{x*100:.2f}%" if not pd.isna(x) else "N/A"
-                            )
-                            st.dataframe(display_irr[['irr_percent']], use_container_width=True)
-                            
-                            # Estatísticas
-                            valid_irrs = ytm_df['irr'].dropna()
-                            if len(valid_irrs) > 0:
-                                st.write("**Estatísticas:**")
-                                st.write(f"- Média: {valid_irrs.mean()*100:.2f}%")
-                                st.write(f"- Mediana: {valid_irrs.median()*100:.2f}%")
-                                st.write(f"- Desvio Padrão: {valid_irrs.std()*100:.2f}%")
-                        
-                        with col2:
-                            # Seletor para exibir fluxo de caixa
-                            selected_company = st.selectbox(
-                                "Selecione empresa para ver fluxo de caixa:",
-                                options=list(cashflow_details.keys())
-                            )
-                            
-                            if selected_company and cashflow_details[selected_company]:
-                                cf_data = cashflow_details[selected_company]
-                                periods = list(range(len(cf_data)))
-                                
-                                fig_cf = go.Figure(data=go.Bar(
-                                    x=[f"Período {i}" for i in periods],
-                                    y=cf_data,
-                                    marker_color=[STK_DOURADO if x >= 0 else 'red' for x in cf_data]
-                                ))
-                                fig_cf.update_layout(
-                                    title=f"Fluxo de Caixa - {selected_company}",
-                                    plot_bgcolor=STK_AZUL,
-                                    paper_bgcolor=STK_AZUL,
-                                    font_color='white'
-                                )
-                                st.plotly_chart(fig_cf, use_container_width=True)
-                    
-                    # Exibe visualizações na aba 3
-                    with tab3:
-                        st.subheader("📈 Visualizações Comparativas")
-                        
-                        # Gráfico de IRR
-                        valid_data = ytm_df.dropna()
-                        if len(valid_data) > 0:
-                            fig_irr = px.bar(
-                                x=valid_data.index,
-                                y=valid_data['irr'] * 100,
-                                title="IRR por Empresa (%)",
-                                color_discrete_sequence=[STK_DOURADO]
-                            )
-                            fig_irr.update_layout(
-                                plot_bgcolor=STK_AZUL,
-                                paper_bgcolor=STK_AZUL,
-                                font_color='white',
-                                xaxis_title="Empresas",
-                                yaxis_title="IRR (%)"
-                            )
-                            st.plotly_chart(fig_irr, use_container_width=True)
-                            
-                            # Gráfico de dispersão IRR vs Market Cap
-                            scatter_data = pd.merge(
-                                resultado[['market_cap']], 
-                                ytm_df[['irr']], 
-                                left_index=True, 
-                                right_index=True
-                            ).dropna()
-                            
-                            if len(scatter_data) > 0:
-                                fig_scatter = px.scatter(
-                                    scatter_data,
-                                    x='market_cap',
-                                    y='irr',
-                                    title="IRR vs Market Cap",
-                                    labels={'market_cap': 'Market Cap (R$)', 'irr': 'IRR'},
-                                    color_discrete_sequence=[STK_DOURADO]
-                                )
-                                fig_scatter.update_layout(
-                                    plot_bgcolor=STK_AZUL,
-                                    paper_bgcolor=STK_AZUL,
-                                    font_color='white'
-                                )
-                                st.plotly_chart(fig_scatter, use_container_width=True)
+                )
                 
-                except Exception as e:
-                    st.error(f"Erro ao processar arquivo Excel: {str(e)}")
-            else:
-                with tab2:
-                    st.info("📁 Faça upload do arquivo Excel para calcular o IRR")
-                with tab3:
-                    st.info("📁 Faça upload do arquivo Excel para ver as visualizações")
-                    
-        except Exception as e:
-            st.error(f"Erro ao baixar dados: {str(e)}")
+                st.plotly_chart(fig_irr, use_container_width=True)
+            
+            # Gráfico adicional: Distribuição de IRR
+            st.subheader("📈 Distribuição de IRR")
+            fig_hist = px.histogram(
+                x=ytm_clean['irr'] * 100,
+                nbins=10,
+                title="Distribuição dos Valores de IRR",
+                color_discrete_sequence=[STK_DOURADO]
+            )
+            fig_hist.update_layout(
+                plot_bgcolor=STK_AZUL,
+                paper_bgcolor=STK_AZUL,
+                font_color='white',
+                xaxis_title="IRR (%)",
+                yaxis_title="Frequência"
+            )
+            st.plotly_chart(fig_hist, use_container_width=True)
+            
+        else:
+            st.error("Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
-else:
-    st.info("👈 Configure os parâmetros na barra lateral e clique em 'Executar Análise'")
+except FileNotFoundError:
+    st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
+except Exception as e:
+    st.error(f"❌ Erro durante a execução: {str(e)}")
 
 # Rodapé
 st.markdown("---")
 st.markdown(f"**Última atualização:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
-
-
