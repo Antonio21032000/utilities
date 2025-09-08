@@ -221,15 +221,15 @@ try:
         # escreve os valores na primeira linha de dados usando rótulos
         target_row = df.index[0]
         
-        # Market cap como saída de caixa no período 0 (investimento inicial)
+        # Data atual para o investimento inicial (market cap)
+        today = datetime.now().date()
+        
+        # Market cap como saída de caixa na data atual
         for ticker in resultado.index:
             if ticker in df.columns:
                 market_cap_value = resultado.loc[ticker, 'market_cap']
-                # Aplica como saída de caixa (negativo) no período 0
-                df.loc[target_row, ticker] = -abs(market_cap_value)  # Força negativo para representar investimento
-
-        # Remove a linha de multiplicação por -1 que estava duplicando o sinal
-        # df.iloc[0] = df.iloc[0] * -1  # REMOVIDO - já está negativo acima
+                # Aplica como saída de caixa (negativo) na data atual
+                df.loc[target_row, ticker] = -abs(market_cap_value)
 
         # garante numéricos nas colunas de tickers
         for t in resultado.index:
@@ -241,8 +241,19 @@ try:
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
-            # espera-se que a primeira linha seja saída (negativa)
-            irr_results[t] = compute_irr(series_cf.values)
+                
+            # Criar datas correspondentes aos fluxos de caixa
+            cashflows = series_cf.values
+            n_periods = len(cashflows)
+            
+            # Data atual para investimento inicial, depois anos subsequentes
+            dates = [today]
+            for i in range(1, n_periods):
+                future_date = today.replace(year=today.year + i)
+                dates.append(future_date)
+            
+            # Calcular XIRR com datas específicas
+            irr_results[t] = compute_xirr(cashflows, dates)
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
 
@@ -339,6 +350,7 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
+
 
 
 
