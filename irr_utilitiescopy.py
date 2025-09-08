@@ -257,12 +257,19 @@ try:
     ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
     
     if len(ytm_clean) > 0:
-        # Gráfico principal usando irr_aj
+        # Criar paleta de cores diferentes para cada empresa
+        colors = [
+            "#C98C2E", "#E67E22", "#F39C12", "#D68910", "#B7950B",
+            "#F1C40F", "#F4D03F", "#58D68D", "#52BE80", "#48C9B0", "#5DADE2"
+        ]
+        
+        # Gráfico principal usando irr_aj com cores diferentes
         fig_irr = px.bar(
             x=ytm_clean.index,
             y=ytm_clean['irr_aj'] * 100,
             title="IRR Real por Empresa",
-            color_discrete_sequence=[STK_DOURADO],
+            color=ytm_clean.index,
+            color_discrete_sequence=colors,
             text=ytm_clean['irr_aj'].apply(lambda x: f"{x*100:.2f}%")
         )
         
@@ -300,8 +307,19 @@ try:
     else:
         st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
+    # Rodapé com aviso para refresh (sempre aparece)
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style='text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 14px; 
+                    background-color: rgba(201, 140, 46, 0.1); padding: 15px; border-radius: 8px; margin-top: 20px;'>
+            💡 <strong>Para pegar os preços mais recentes e a YTM mais atualizada, dê refresh na página</strong>
+        </div>
+        """, 
+        unsafe_allow_html=True
+    )
+
 except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
-
