@@ -3,8 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Tenta importar numpy_financial
 try:
@@ -48,23 +47,6 @@ st.markdown("""
             padding: 0;
             font-family: sans-serif;
             letter-spacing: 1px;
-        }
-        
-        .stTabs [data-baseweb="tab-list"] {
-            gap: 2px;
-            background-color: #102E46;
-        }
-
-        .stTabs [data-baseweb="tab"] {
-            color: #C98C2E;
-            background-color: rgba(201, 140, 46, 0.1);
-            padding: 10px 20px;
-            border-radius: 5px 5px 0 0;
-        }
-
-        .stTabs [aria-selected="true"] {
-            background-color: rgba(201, 140, 46, 0.2);
-            color: white;
         }
         
         #MainMenu {visibility: hidden;}
@@ -217,120 +199,52 @@ try:
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
 
-    # Criar tabs
-    tab1, tab2 = st.tabs(["📊 Market Cap & Dados", "💰 Análise IRR"])
-
-    with tab1:
-        st.subheader("📊 Dados das Empresas")
+    # Limpar dados inválidos e ordenar
+    ytm_clean = ytm_df.dropna().sort_values('irr', ascending=True)
+    
+    if len(ytm_clean) > 0:
+        # Gráfico principal do ytm_df
+        fig_irr = px.bar(
+            x=ytm_clean.index,
+            y=ytm_clean['irr'] * 100,
+            title="IRR (Yield to Maturity) por Empresa",
+            color_discrete_sequence=[STK_DOURADO],
+            text=ytm_clean['irr'].apply(lambda x: f"{x*100:.2f}%")
+        )
         
-        col1, col2 = st.columns(2)
+        fig_irr.update_traces(
+            textposition='outside',
+            textfont=dict(color='white', size=14)
+        )
         
-        with col1:
-            st.write("**Market Cap e Preços:**")
-            display_df = resultado.copy()
-            display_df['market_cap_original'] = display_df['market_cap'] * 1e6  # Volta para valor original
-            display_df['market_cap_formatted'] = display_df['market_cap_original'].apply(lambda x: f"R$ {x:,.0f}" if not pd.isna(x) else "N/A")
-            display_df['price_formatted'] = display_df['price'].apply(lambda x: f"R$ {x:.2f}" if not pd.isna(x) else "N/A")
-            display_df['shares_formatted'] = display_df['shares'].apply(lambda x: f"{x:,}" if not pd.isna(x) else "N/A")
-            
-            st.dataframe(display_df[['price_formatted', 'shares_formatted', 'market_cap_formatted']], use_container_width=True)
-        
-        with col2:
-            # Gráfico de market cap
-            valid_mc = resultado.dropna(subset=['market_cap'])
-            if len(valid_mc) > 0:
-                fig_mc = px.bar(
-                    x=valid_mc.index,
-                    y=valid_mc['market_cap'],
-                    title="Market Cap por Empresa (Milhões R$)",
-                    color_discrete_sequence=[STK_DOURADO]
-                )
-                fig_mc.update_layout(
-                    plot_bgcolor=STK_AZUL,
-                    paper_bgcolor=STK_AZUL,
-                    font_color='white',
-                    xaxis_title="Empresas",
-                    yaxis_title="Market Cap (Milhões R$)"
-                )
-                st.plotly_chart(fig_mc, use_container_width=True)
-
-    with tab2:
-        st.subheader("💰 Análise de IRR (Yield to Maturity)")
-        
-        # Limpar dados inválidos e ordenar
-        ytm_clean = ytm_df.dropna().sort_values('irr', ascending=True)
-        
-        if len(ytm_clean) > 0:
-            col1, col2 = st.columns([1, 2])
-            
-            with col1:
-                st.write("**Resultados de IRR:**")
-                display_irr = ytm_clean.copy()
-                display_irr['irr_percent'] = display_irr['irr'].apply(lambda x: f"{x*100:.2f}%")
-                st.dataframe(display_irr[['irr_percent']], use_container_width=True)
-                
-                # Estatísticas
-                st.write("**Estatísticas:**")
-                st.metric("Média", f"{ytm_clean['irr'].mean()*100:.2f}%")
-                st.metric("Mediana", f"{ytm_clean['irr'].median()*100:.2f}%")
-                st.metric("Desvio Padrão", f"{ytm_clean['irr'].std()*100:.2f}%")
-                st.metric("Melhor IRR", f"{ytm_clean['irr'].max()*100:.2f}%")
-                st.metric("Pior IRR", f"{ytm_clean['irr'].min()*100:.2f}%")
-            
-            with col2:
-                # Gráfico principal do ytm_df
-                fig_irr = px.bar(
-                    x=ytm_clean.index,
-                    y=ytm_clean['irr'] * 100,
-                    title="IRR (Yield to Maturity) por Empresa",
-                    color_discrete_sequence=[STK_DOURADO],
-                    text=ytm_clean['irr'].apply(lambda x: f"{x*100:.2f}%")
-                )
-                
-                fig_irr.update_traces(
-                    textposition='outside',
-                    textfont=dict(color='white', size=12)
-                )
-                
-                fig_irr.update_layout(
-                    plot_bgcolor=STK_AZUL,
-                    paper_bgcolor=STK_AZUL,
-                    font_color='white',
-                    xaxis_title="Empresas",
-                    yaxis_title="IRR (%)",
-                    height=500,
-                    showlegend=False,
-                    xaxis=dict(
-                        showgrid=True,
-                        gridcolor='rgba(255, 255, 255, 0.1)',
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridcolor='rgba(255, 255, 255, 0.1)',
-                    )
-                )
-                
-                st.plotly_chart(fig_irr, use_container_width=True)
-            
-            # Gráfico adicional: Distribuição de IRR
-            st.subheader("📈 Distribuição de IRR")
-            fig_hist = px.histogram(
-                x=ytm_clean['irr'] * 100,
-                nbins=10,
-                title="Distribuição dos Valores de IRR",
-                color_discrete_sequence=[STK_DOURADO]
+        fig_irr.update_layout(
+            plot_bgcolor=STK_AZUL,
+            paper_bgcolor=STK_AZUL,
+            font_color='white',
+            xaxis_title="Empresas",
+            yaxis_title="IRR (%)",
+            height=600,
+            showlegend=False,
+            margin=dict(t=50, b=50, l=50, r=50),
+            xaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(255, 255, 255, 0.1)',
+                tickfont=dict(color='white', size=14),
+                title_font=dict(color='white', size=16)
+            ),
+            yaxis=dict(
+                showgrid=True,
+                gridcolor='rgba(255, 255, 255, 0.1)',
+                tickfont=dict(color='white', size=14),
+                tickformat='.2f',
+                title_font=dict(color='white', size=16)
             )
-            fig_hist.update_layout(
-                plot_bgcolor=STK_AZUL,
-                paper_bgcolor=STK_AZUL,
-                font_color='white',
-                xaxis_title="IRR (%)",
-                yaxis_title="Frequência"
-            )
-            st.plotly_chart(fig_hist, use_container_width=True)
-            
-        else:
-            st.error("Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
+        )
+        
+        st.plotly_chart(fig_irr, use_container_width=True)
+        
+    else:
+        st.error("Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
 except FileNotFoundError:
     st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
@@ -340,3 +254,4 @@ except Exception as e:
 # Rodapé
 st.markdown("---")
 st.markdown(f"**Última atualização:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
