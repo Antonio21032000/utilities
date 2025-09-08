@@ -325,3 +325,4 @@ except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
 
 
+
