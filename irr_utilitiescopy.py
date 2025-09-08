@@ -257,23 +257,33 @@ try:
     ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
     
     if len(ytm_clean) > 0:
-        # Criar paleta de cores neutras para cada empresa
+        # Criar paleta de cores vibrantes e elegantes
         colors = [
-            "#8E8E93", "#A8A8A8", "#B8B8B8", "#9E9E9E", "#ADADAD",
-            "#BABABA", "#C7C7C7", "#D1D1D1", "#DBDBDB", "#E5E5E5", "#F0F0F0"
+            "#3498DB", "#E74C3C", "#F39C12", "#9B59B6", "#1ABC9C",
+            "#E67E22", "#34495E", "#27AE60", "#F1C40F", "#8E44AD", "#16A085"
         ]
         
-        # Gráfico principal usando irr_aj com cores diferentes
+        # Criar DataFrame para o gráfico com cores específicas
+        plot_data = pd.DataFrame({
+            'empresa': ytm_clean.index,
+            'irr': ytm_clean['irr_aj'] * 100,
+            'cor': colors[:len(ytm_clean)]
+        })
+        
+        # Gráfico principal usando irr_aj com cores vibrantes
         fig_irr = px.bar(
-            x=ytm_clean.index,
-            y=ytm_clean['irr_aj'] * 100,
+            plot_data,
+            x='empresa',
+            y='irr',
             title="IRR Real por Empresa",
-            color=ytm_clean.index,
+            color='empresa',
             color_discrete_sequence=colors,
-            text=ytm_clean['irr_aj'].apply(lambda x: f"{x*100:.2f}%")
+            text='irr'
         )
         
+        # Formatar texto nas barras
         fig_irr.update_traces(
+            texttemplate='%{text:.2f}%',
             textposition='outside',
             textfont=dict(color='white', size=14)
         )
@@ -311,7 +321,7 @@ try:
     st.markdown("---")
     st.markdown(
         """
-        <div style='text-align: center; color: rgba(255, 255, 255, 0.7); font-size: 14px; 
+        <div style='text-align: center; color: rgba(255, 255, 255, 0.9); font-size: 18px; font-weight: bold;
                     background-color: rgba(201, 140, 46, 0.1); padding: 15px; border-radius: 8px; margin-top: 20px;'>
             💡 <strong>Para pegar os preços mais recentes e a YTM mais atualizada, dê refresh na página</strong>
         </div>
