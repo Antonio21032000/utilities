@@ -13,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="IRR Utilities & Malls",
+    page_title="Análise de IRR",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -106,7 +106,7 @@ st.markdown("""
 # Título personalizado
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text" style="color: white !important;">Análise de IRR</h1>
+        <h1 class="title-text" style="color: white !important;">Análise de IRR - Empresas B3</h1>
     </div>
 """, unsafe_allow_html=True)
 
@@ -263,7 +263,7 @@ try:
             paper_bgcolor=STK_AZUL,
             font_color='white',
             xaxis_title="Empresas",
-            yaxis_title="IRR (%)",
+            yaxis_title="IRR Real (%)",
             height=600,
             showlegend=False,
             margin=dict(t=50, b=50, l=50, r=50),
@@ -291,6 +291,7 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
+
 
 
 
