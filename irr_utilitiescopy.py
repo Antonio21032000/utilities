@@ -257,10 +257,10 @@ try:
     ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
     
     if len(ytm_clean) > 0:
-        # Criar paleta de cores vibrantes e elegantes
+        # Criar paleta de cores neutras e elegantes
         colors = [
-            "#3498DB", "#E74C3C", "#F39C12", "#9B59B6", "#1ABC9C",
-            "#E67E22", "#34495E", "#27AE60", "#F1C40F", "#8E44AD", "#16A085"
+            "#708090", "#A9A9A9", "#BC987E", "#87A96B", "#8FBC8F",
+            "#D2B48C", "#DEB887", "#B0C4DE", "#C0C0C0", "#98A2B3", "#8B9DC3"
         ]
         
         # Criar DataFrame para o gráfico com cores específicas
