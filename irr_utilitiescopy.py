@@ -257,10 +257,10 @@ try:
     ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
     
     if len(ytm_clean) > 0:
-        # Criar paleta de cores diferentes para cada empresa
+        # Criar paleta de cores neutras para cada empresa
         colors = [
-            "#C98C2E", "#E67E22", "#F39C12", "#D68910", "#B7950B",
-            "#F1C40F", "#F4D03F", "#58D68D", "#52BE80", "#48C9B0", "#5DADE2"
+            "#8E8E93", "#A8A8A8", "#B8B8B8", "#9E9E9E", "#ADADAD",
+            "#BABABA", "#C7C7C7", "#D1D1D1", "#DBDBDB", "#E5E5E5", "#F0F0F0"
         ]
         
         # Gráfico principal usando irr_aj com cores diferentes
@@ -323,3 +323,4 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
+
