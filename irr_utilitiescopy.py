@@ -13,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR",
+    page_title="IRR Real",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -106,7 +106,7 @@ st.markdown("""
 # Título personalizado
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text" style="color: white !important;">Análise de IRR - Empresas B3</h1>
+        <h1 class="title-text" style="color: white !important;">IRR Real</h1>
     </div>
 """, unsafe_allow_html=True)
 
@@ -240,17 +240,30 @@ try:
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
 
-    # Limpar dados inválidos e ordenar
-    ytm_clean = ytm_df.dropna().sort_values('irr', ascending=True)
+        # Cria uma nova coluna no ytm_df com os mesmos valores da coluna irr
+        ytm_df['irr_aj'] = ytm_df['irr']
+
+        # Agora nessa irr_aj coluna, faz a conta em IGTI11, MULT3, ALOS3 considerando (1+irr) / (1+4,5%) - 1 para pegar a irr real deles
+        if 'IGTI11' in ytm_df.index and not pd.isna(ytm_df.loc['IGTI11', 'irr']):
+            ytm_df.loc['IGTI11', 'irr_aj'] = ((1 + ytm_df.loc['IGTI11', 'irr']) / (1 + 0.045)) - 1
+        
+        if 'MULT3' in ytm_df.index and not pd.isna(ytm_df.loc['MULT3', 'irr']):
+            ytm_df.loc['MULT3', 'irr_aj'] = ((1 + ytm_df.loc['MULT3', 'irr']) / (1 + 0.045)) - 1
+        
+        if 'ALOS3' in ytm_df.index and not pd.isna(ytm_df.loc['ALOS3', 'irr']):
+            ytm_df.loc['ALOS3', 'irr_aj'] = ((1 + ytm_df.loc['ALOS3', 'irr']) / (1 + 0.045)) - 1
+
+    # Limpar dados inválidos e ordenar usando a coluna irr_aj
+    ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
     
     if len(ytm_clean) > 0:
-        # Gráfico principal do ytm_df
+        # Gráfico principal usando irr_aj
         fig_irr = px.bar(
             x=ytm_clean.index,
-            y=ytm_clean['irr'] * 100,
-            title="IRR (Yield to Maturity) por Empresa",
+            y=ytm_clean['irr_aj'] * 100,
+            title="IRR Real por Empresa",
             color_discrete_sequence=[STK_DOURADO],
-            text=ytm_clean['irr'].apply(lambda x: f"{x*100:.2f}%")
+            text=ytm_clean['irr_aj'].apply(lambda x: f"{x*100:.2f}%")
         )
         
         fig_irr.update_traces(
