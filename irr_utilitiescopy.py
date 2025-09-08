@@ -220,10 +220,16 @@ try:
 
         # escreve os valores na primeira linha de dados usando rótulos
         target_row = df.index[0]
-        df.loc[target_row, list(resultado.index)] = list(resultado['market_cap'].values)
+        
+        # Market cap como saída de caixa no período 0 (investimento inicial)
+        for ticker in resultado.index:
+            if ticker in df.columns:
+                market_cap_value = resultado.loc[ticker, 'market_cap']
+                # Aplica como saída de caixa (negativo) no período 0
+                df.loc[target_row, ticker] = -abs(market_cap_value)  # Força negativo para representar investimento
 
-        # multiplica por -1 a linha do 1 do df
-        df.iloc[0] = df.iloc[0] * -1
+        # Remove a linha de multiplicação por -1 que estava duplicando o sinal
+        # df.iloc[0] = df.iloc[0] * -1  # REMOVIDO - já está negativo acima
 
         # garante numéricos nas colunas de tickers
         for t in resultado.index:
