@@ -13,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Empresas B3",
+    page_title="Análise de IRR",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -28,6 +28,7 @@ st.markdown("""
     <style>
         .stApp {
             background-color: #102E46;
+            color: white;
         }
         
         .title-container {
@@ -49,6 +50,36 @@ st.markdown("""
             letter-spacing: 1px;
         }
         
+        /* Forçar texto branco em todos os elementos */
+        .stMarkdown, .stText, p, div, span {
+            color: white !important;
+        }
+        
+        /* Spinner com texto branco */
+        .stSpinner > div {
+            color: white !important;
+        }
+        
+        /* Texto de loading */
+        .stSpinner > div > div {
+            color: white !important;
+        }
+        
+        /* Melhorar visibilidade de todos os textos */
+        .st-emotion-cache-1y4p8pa {
+            color: white !important;
+        }
+        
+        .st-emotion-cache-16txtl3 {
+            color: white !important;
+        }
+        
+        /* Texto de erro */
+        .stAlert {
+            background-color: rgba(255, 255, 255, 0.1) !important;
+            color: white !important;
+        }
+        
         #MainMenu {visibility: hidden;}
         footer {visibility: hidden;}
         header {visibility: hidden;}
@@ -58,6 +89,16 @@ st.markdown("""
             padding-bottom: 0rem;
             padding-left: 2rem;
             padding-right: 2rem;
+        }
+        
+        /* Forçar contraste alto */
+        * {
+            color: white !important;
+        }
+        
+        /* Exceções para elementos que devem manter cor original */
+        .title-text, .stPlotlyChart {
+            color: inherit !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -114,7 +155,7 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # Executar o código principal
 try:
-    with st.spinner("Carregando dados e calculando IRR..."):
+    with st.spinner("🔄 Carregando dados e calculando IRR..."):
         
         # Buscar preços de fechamento para múltiplos tickers da B3
         tickers = [
@@ -250,8 +291,4 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
-
-# Rodapé com melhor visibilidade
-st.markdown("---")
-st.markdown(f"<p style='color: white; text-align: center;'><strong>Última atualização:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>", unsafe_allow_html=True)
 
