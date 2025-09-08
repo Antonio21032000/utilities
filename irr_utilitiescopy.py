@@ -394,9 +394,3 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
-
-
-
-
-
-
