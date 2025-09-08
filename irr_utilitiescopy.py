@@ -13,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="Análise de IRR - Empresas B3",
+    page_title="Análise de IRR",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -254,4 +254,5 @@ except Exception as e:
 # Rodapé
 st.markdown("---")
 st.markdown(f"**Última atualização:** {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}")
+
 
