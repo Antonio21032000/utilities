@@ -256,3 +256,4 @@ st.markdown("---")
 st.markdown(f"<p style='color: white; text-align: center;'><strong>Última atualização:</strong> {datetime.now().strftime('%d/%m/%Y %H:%M:%S')}</p>", unsafe_allow_html=True)
 
 
+
