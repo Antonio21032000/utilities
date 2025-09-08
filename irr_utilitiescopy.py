@@ -146,6 +146,50 @@ def compute_irr(cashflows: np.ndarray) -> float:
             low, f_low = mid, f_mid
     return mid
 
+# Função para calcular XIRR (como Excel) com datas específicas
+def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
+    """
+    Calcula XIRR considerando datas específicas para cada fluxo de caixa
+    Similar à função XIRR do Excel
+    """
+    if len(cashflows) != len(dates):
+        return np.nan
+        
+    values = np.asarray(cashflows, dtype=float)
+    dates = pd.to_datetime(dates)
+    
+    # Data base (primeira data)
+    base_date = dates[0]
+    
+    # Converter datas para anos decimais desde a data base
+    years = [(d - base_date).days / 365.25 for d in dates]
+    
+    def xnpv(rate):
+        """Calcula NPV considerando datas específicas"""
+        return sum(cf / (1 + rate) ** year for cf, year in zip(values, years))
+    
+    # Método de Newton-Raphson para encontrar a taxa
+    rate = guess
+    for _ in range(100):
+        npv = xnpv(rate)
+        if abs(npv) < 1e-6:
+            return rate
+            
+        # Derivada numérica
+        delta = 1e-6
+        d_npv = (xnpv(rate + delta) - xnpv(rate - delta)) / (2 * delta)
+        
+        if abs(d_npv) < 1e-10:
+            return np.nan
+            
+        rate = rate - npv / d_npv
+        
+        # Verificar convergência
+        if rate < -0.99 or rate > 100:
+            return np.nan
+            
+    return rate
+
 # Função para converter market cap
 def cap_to_first_digits_mln(value, digits=6):
     if pd.isna(value):
