@@ -80,257 +80,259 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 def main():
-    st.title("📊 Dashboard de Análise IRR")
-    st.markdown("---")
+    # Configuração da página
+    st.set_page_config(
+        page_title="IRR Real Dashboard",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
     
-    with st.spinner("🔄 Carregando dados e calculando XIRR..."):
+    # CSS personalizado para o design
+    st.markdown("""
+    <style>
+    .main-header {
+        background: linear-gradient(90deg, #D4AF37, #FFD700);
+        padding: 2rem;
+        border-radius: 10px;
+        text-align: center;
+        margin-bottom: 2rem;
+    }
+    .main-header h1 {
+        color: white;
+        font-size: 3rem;
+        font-weight: bold;
+        margin: 0;
+        text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+    }
+    .stApp {
+        background-color: #1e3a5f;
+    }
+    .footer-note {
+        text-align: center;
+        color: #FFD700;
+        font-size: 0.9rem;
+        margin-top: 2rem;
+        padding: 1rem;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+    
+    # Header principal
+    st.markdown("""
+    <div class="main-header">
+        <h1>IRR Real</h1>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    try:
+        # Tickes a baixar do Yahoo (apenas os necessários para preços)
+        tickers_for_prices = [
+            # Consolidações por classes
+            "CPLE3", "CPLE6",      # Copel
+            "IGTI3", "IGTI4",      # Iguatemi
+            "ENGI3", "ENGI4",      # Energisa
+            # Demais nomes individuais
+            "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3"
+        ]
+
+        tickers_sa = [f"{t}.SA" for t in tickers_for_prices]
+        closes = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
+        last_close = closes.iloc[-1]
+        last_close.index = [t.replace(".SA", "") for t in last_close.index]
+        prices = last_close.astype(float)
+
+        # Quantidade de ações por classe (fornecidas)
+        shares_classes = {
+            # Copel
+            "CPLE3": 1_300_347_300,
+            "CPLE6": 1_679_335_290,
+            # Iguatemi
+            "IGTI3": 770_992_429,
+            "IGTI4": 435_368_756,
+            # Energisa
+            "ENGI3": 887_231_247,
+            "ENGI4": 1_402_193_416,
+            # Demais (1 classe)
+            "EQTL3": 1_255_510_000,
+            "SBSP3": 683_510_000,
+            "NEOE3": 1_213_800_000,
+            "ENEV3": 1_936_970_000,
+            "ELET3": 2_308_630_000,
+            "EGIE3": 815_928_000,
+            "MULT3": 513_164_000,
+            "ALOS3": 542_937_000,
+        }
+
+        shares_series = pd.Series(shares_classes).reindex(prices.index)
+        mc_raw = prices * shares_series
+
+        # --- Consolidações de market cap ---
+        # Copel -> representante: CPLE6
+        if {"CPLE3", "CPLE6"}.issubset(mc_raw.index):
+            cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
+        else:
+            raise ValueError("Preços de CPLE3/CPLE6 não encontrados.")
+
+        # Iguatemi -> alimentar IGTI11
+        if {"IGTI3", "IGTI4"}.issubset(mc_raw.index):
+            igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
+        else:
+            raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
+
+        # Energisa -> alimentar ENGI11
+        if {"ENGI3", "ENGI4"}.issubset(mc_raw.index):
+            engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
+        else:
+            raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
+
+        # --- Monta a tabela final 'resultado' com os tickers da planilha ---
+        final_tickers = [
+            "CPLE6", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
+            "MULT3", "ALOS3", "IGTI11", "ENGI11"
+        ]
+
+        rows = []
+        for t in final_tickers:
+            if t == "CPLE6":
+                price = prices.get("CPLE6", np.nan)
+                shares = shares_classes["CPLE3"] + shares_classes["CPLE6"]
+                mc = cple_total
+            elif t == "IGTI11":
+                price = np.nan  # não usamos preço direto do Yahoo
+                shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]  # apenas referência
+                mc = igti_total
+            elif t == "ENGI11":
+                price = np.nan
+                shares = shares_classes["ENGI3"] + shares_classes["ENGI4"]
+                mc = engi_total
+            else:
+                price = prices.get(t, np.nan)
+                shares = shares_classes.get(t, np.nan)
+                mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
+
+            rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
+
+        resultado = pd.DataFrame(rows).set_index("ticker")
+        # Reduz market_cap para milhões e mantém 6 primeiros dígitos (conforme sua lógica)
+        resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
+
+        # === Carrega Excel com fluxos de caixa ===
         try:
-            # Tickes a baixar do Yahoo (apenas os necessários para preços)
-            tickers_for_prices = [
-                # Consolidações por classes
-                "CPLE3", "CPLE6",      # Copel
-                "IGTI3", "IGTI4",      # Iguatemi
-                "ENGI3", "ENGI4",      # Energisa
-                # Demais nomes individuais
-                "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3"
-            ]
+            df = pd.read_excel('irrdash3.xlsx')
+        except FileNotFoundError:
+            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
+            return
 
-            tickers_sa = [f"{t}.SA" for t in tickers_for_prices]
-            closes = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
-            last_close = closes.iloc[-1]
-            last_close.index = [t.replace(".SA", "") for t in last_close.index]
-            prices = last_close.astype(float)
+        # Primeira linha como cabeçalho
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
 
-            # Quantidade de ações por classe (fornecidas)
-            shares_classes = {
-                # Copel
-                "CPLE3": 1_300_347_300,
-                "CPLE6": 1_679_335_290,
-                # Iguatemi
-                "IGTI3": 770_992_429,
-                "IGTI4": 435_368_756,
-                # Energisa
-                "ENGI3": 887_231_247,
-                "ENGI4": 1_402_193_416,
-                # Demais (1 classe)
-                "EQTL3": 1_255_510_000,
-                "SBSP3": 683_510_000,
-                "NEOE3": 1_213_800_000,
-                "ENEV3": 1_936_970_000,
-                "ELET3": 2_308_630_000,
-                "EGIE3": 815_928_000,
-                "MULT3": 513_164_000,
-                "ALOS3": 542_937_000,
-            }
+        # Garante colunas para todos os tickers de 'resultado'
+        for t in resultado.index:
+            if t not in df.columns:
+                df[t] = pd.NA
 
-            shares_series = pd.Series(shares_classes).reindex(prices.index)
-            mc_raw = prices * shares_series
+        # Escreve market caps (negativos) na primeira linha de dados
+        target_row = df.index[0]
+        today = datetime.now().date()
+        for ticker in resultado.index:
+            mc_val = resultado.loc[ticker, 'market_cap']
+            df.loc[target_row, ticker] = -abs(mc_val)
 
-            # --- Consolidações de market cap ---
-            # Copel -> representante: CPLE6
-            if {"CPLE3", "CPLE6"}.issubset(mc_raw.index):
-                cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
-            else:
-                raise ValueError("Preços de CPLE3/CPLE6 não encontrados.")
+        # Garante numéricos nas colunas dos tickers
+        for t in resultado.index:
+            df[t] = pd.to_numeric(df[t], errors='coerce')
 
-            # Iguatemi -> alimentar IGTI11
-            if {"IGTI3", "IGTI4"}.issubset(mc_raw.index):
-                igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
-            else:
-                raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
+        # === XIRR por ticker (sem zeragem em 2025-12-31) ===
+        irr_results = {}
+        
+        for t in resultado.index:
+            series_cf = df[t].dropna()
+            if series_cf.empty:
+                irr_results[t] = np.nan
+                continue
 
-            # Energisa -> alimentar ENGI11
-            if {"ENGI3", "ENGI4"}.issubset(mc_raw.index):
-                engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-            else:
-                raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
+            cashflows = series_cf.values.astype(float).copy()
+            n_periods = len(cashflows)
 
-            # --- Monta a tabela final 'resultado' com os tickers da planilha ---
-            final_tickers = [
-                "CPLE6", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-                "MULT3", "ALOS3", "IGTI11", "ENGI11"
-            ]
+            # Datas: hoje (market cap) + 31/12 de cada ano subsequente
+            dates_list = [today]
+            for j in range(1, n_periods):
+                future_dt = date(today.year + j - 1, 12, 31)
+                dates_list.append(future_dt)
 
-            rows = []
-            for t in final_tickers:
-                if t == "CPLE6":
-                    price = prices.get("CPLE6", np.nan)
-                    shares = shares_classes["CPLE3"] + shares_classes["CPLE6"]
-                    mc = cple_total
-                elif t == "IGTI11":
-                    price = np.nan  # não usamos preço direto do Yahoo
-                    shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]  # apenas referência
-                    mc = igti_total
-                elif t == "ENGI11":
-                    price = np.nan
-                    shares = shares_classes["ENGI3"] + shares_classes["ENGI4"]
-                    mc = engi_total
-                else:
-                    price = prices.get(t, np.nan)
-                    shares = shares_classes.get(t, np.nan)
-                    mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
+            irr_results[t] = compute_xirr(cashflows, dates_list)
 
-                rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
+        ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
+        ytm_df['irr_aj'] = ytm_df['irr']  # inicial
 
-            resultado = pd.DataFrame(rows).set_index("ticker")
-            # Reduz market_cap para milhões e mantém 6 primeiros dígitos (conforme sua lógica)
-            resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
+        # Ajuste de IRR real SOMENTE para MULT3, ALOS3 e IGTI11 (deflator 4,5% a.a.)
+        for ticker_adj in ['MULT3', 'ALOS3', 'IGTI11']:
+            if ticker_adj in ytm_df.index and not pd.isna(ytm_df.loc[ticker_adj, 'irr']):
+                ytm_df.loc[ticker_adj, 'irr_aj'] = ((1 + ytm_df.loc[ticker_adj, 'irr']) / (1 + 0.045)) - 1
 
-            st.subheader("📊 Dados (market cap em milhões, 6 primeiros dígitos)")
-            st.dataframe(resultado)
+        ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
 
-            # === Carrega Excel com fluxos de caixa ===
-            try:
-                df = pd.read_excel('irrdash3.xlsx')
-            except FileNotFoundError:
-                st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado. Coloque-o no diretório de execução.")
-                return
-
-            # Primeira linha como cabeçalho
-            df.columns = df.iloc[0]
-            df = df.iloc[1:]
-
-            # Garante colunas para todos os tickers de 'resultado'
-            for t in resultado.index:
-                if t not in df.columns:
-                    df[t] = pd.NA
-
-            # Escreve market caps (negativos) na primeira linha de dados
-            target_row = df.index[0]
-            today = datetime.now().date()
-            for ticker in resultado.index:
-                mc_val = resultado.loc[ticker, 'market_cap']
-                df.loc[target_row, ticker] = -abs(mc_val)
-
-            # Garante numéricos nas colunas dos tickers
-            for t in resultado.index:
-                df[t] = pd.to_numeric(df[t], errors='coerce')
-
-            st.subheader("💰 Fluxos de caixa por empresa")
-            cashflow_display = df[resultado.index].copy()
-            st.dataframe(cashflow_display)
-
-            # === XIRR por ticker (sem zeragem em 2025-12-31) ===
-            st.subheader("🧮 Calculando XIRR para cada empresa (com datas específicas)")
-            irr_results = {}
-            
-            progress_bar = st.progress(0)
-            status_text = st.empty()
-            
-            for i, t in enumerate(resultado.index):
-                status_text.text(f'Calculando IRR para {t}...')
-                progress_bar.progress((i + 1) / len(resultado.index))
-                
-                series_cf = df[t].dropna()
-                if series_cf.empty:
-                    irr_results[t] = np.nan
-                    continue
-
-                cashflows = series_cf.values.astype(float).copy()
-                n_periods = len(cashflows)
-
-                # Datas: hoje (market cap) + 31/12 de cada ano subsequente
-                dates_list = [today]
-                for j in range(1, n_periods):
-                    future_dt = date(today.year + j - 1, 12, 31)
-                    dates_list.append(future_dt)
-
-                cf_with_dates = pd.DataFrame({
-                    'Data': dates_list,
-                    'Fluxo_de_Caixa': cashflows,
-                    'Ano': [d.year for d in dates_list]
-                })
-
-                with st.expander(f"📊 {t} - Fluxos de caixa com datas (para XIRR)"):
-                    st.dataframe(cf_with_dates)
-
-                irr_results[t] = compute_xirr(cashflows, dates_list)
-                if pd.isna(irr_results[t]):
-                    st.write(f"  ➤ {t} - XIRR calculado: N/A")
-                else:
-                    st.write(f"  ➤ {t} - XIRR calculado: {irr_results[t]:.4f} ({irr_results[t]*100:.2f}%)")
-
-            status_text.text('Cálculo concluído!')
-
-            ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
-            ytm_df['irr_aj'] = ytm_df['irr']  # inicial
-
-            # Ajuste de IRR real SOMENTE para MULT3, ALOS3 e IGTI11 (deflator 4,5% a.a.)
-            st.subheader("🔧 Aplicando ajuste de IRR real (deflator 4,5% a.a.) para MULT3, ALOS3 e IGTI11")
-            for ticker_adj in ['MULT3', 'ALOS3', 'IGTI11']:
-                if ticker_adj in ytm_df.index and not pd.isna(ytm_df.loc[ticker_adj, 'irr']):
-                    ytm_df.loc[ticker_adj, 'irr_aj'] = ((1 + ytm_df.loc[ticker_adj, 'irr']) / (1 + 0.045)) - 1
-                    st.write(f"  {ticker_adj}: {ytm_df.loc[ticker_adj, 'irr_aj']*100:.2f}% (real)")
-
-            ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
-
-            st.subheader("📈 Resultados finais - IRR (ajustada onde aplicável) ordenada")
-            
-            # Tabela dos resultados
-            result_display = pd.DataFrame({
-                'Empresa': ytm_clean.index,
-                'IRR (%)': (ytm_clean['irr_aj'] * 100).round(2)
+        if len(ytm_clean) > 0:
+            plot_data = pd.DataFrame({
+                'empresa': ytm_clean.index,
+                'irr': ytm_clean['irr_aj'] * 100,
             })
-            st.dataframe(result_display, use_container_width=True)
 
-            if len(ytm_clean) > 0:
-                plot_data = pd.DataFrame({
-                    'empresa': ytm_clean.index,
-                    'irr': ytm_clean['irr_aj'] * 100,
-                })
+            # Criar gráfico com design similar à imagem
+            fig_irr = px.bar(
+                plot_data,
+                x='empresa',
+                y='irr',
+                text='irr',
+                color='irr',
+                color_continuous_scale='Viridis'
+            )
 
-                # Criar gráfico com design similar à imagem
-                fig_irr = px.bar(
-                    plot_data,
-                    x='empresa',
-                    y='irr',
-                    text='irr',
-                    color='irr',
-                    color_continuous_scale='Viridis'
-                )
+            fig_irr.update_traces(
+                texttemplate='%{text:.2f}%',
+                textposition='outside',
+                textfont=dict(color='white', size=14),
+                marker_line_width=0
+            )
 
-                fig_irr.update_traces(
-                    texttemplate='%{text:.2f}%',
-                    textposition='outside',
-                    textfont=dict(color='white', size=14),
-                    marker_line_width=0
-                )
+            fig_irr.update_layout(
+                plot_bgcolor='rgba(30, 58, 95, 1)',
+                paper_bgcolor='rgba(30, 58, 95, 1)',
+                font_color='white',
+                xaxis_title="Empresas",
+                yaxis_title="IRR Real (%)",
+                height=600,
+                showlegend=False,
+                yaxis=dict(
+                    range=[0, max(plot_data['irr']) * 1.15],
+                    gridcolor='rgba(255,255,255,0.1)',
+                    tickfont=dict(color='white')
+                ),
+                xaxis=dict(
+                    tickfont=dict(color='white', size=12)
+                ),
+                margin=dict(l=50, r=50, t=50, b=100)
+            )
 
-                fig_irr.update_layout(
-                    plot_bgcolor='rgba(30, 58, 95, 1)',
-                    paper_bgcolor='rgba(30, 58, 95, 1)',
-                    font_color='white',
-                    xaxis_title="Empresas",
-                    yaxis_title="IRR Real (%)",
-                    height=600,
-                    showlegend=False,
-                    yaxis=dict(
-                        range=[0, max(plot_data['irr']) * 1.15],
-                        gridcolor='rgba(255,255,255,0.1)',
-                        tickfont=dict(color='white')
-                    ),
-                    xaxis=dict(
-                        tickfont=dict(color='white', size=12)
-                    ),
-                    margin=dict(l=50, r=50, t=50, b=100)
-                )
+            fig_irr.update_coloraxes(showscale=False)
 
-                fig_irr.update_coloraxes(showscale=False)
+            st.plotly_chart(fig_irr, use_container_width=True)
+            
+            # Nota de rodapé
+            st.markdown("""
+            <div class="footer-note">
+                💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
 
-                st.plotly_chart(fig_irr, use_container_width=True)
-                
-                # Nota de rodapé
-                st.markdown("""
-                <div class="footer-note">
-                    💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.warning("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
-
-        except Exception as e:
-            st.error(f"❌ Erro durante a execução: {str(e)}")
+    except Exception as e:
+        st.error(f"❌ Erro: {str(e)}")
 
 if __name__ == "__main__":
     main()
+
 
