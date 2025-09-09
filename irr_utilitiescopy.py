@@ -76,16 +76,10 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
-    """
-    Retorna:
-      - prices: pd.Series (preço por ticker, sem .SA)
-      - meta:   pd.DataFrame(Fonte, Timestamp) por ticker
-    Tenta intraday 1m; se faltar, usa daily close.
-    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
-    # Intraday 1m (batch)
+    # intraday 1m
     try:
         intraday = yf.download(tickers_sa, period="1d", interval="1m", progress=False)["Close"]
         if isinstance(intraday, pd.Series):
@@ -93,25 +87,21 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         intraday = intraday.ffill()
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
-        intraday = pd.DataFrame()
-        ts1m = None
+        intraday, ts1m = pd.DataFrame(), None
 
-    # Daily close (batch)
+    # daily close
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
     except Exception:
-        daily = pd.DataFrame()
-        tsd = None
+        daily, tsd = pd.DataFrame(), None
 
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
-
         if ts1m is not None and tsa in getattr(intraday, "columns", []):
             v = intraday.loc[ts1m, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = ts1m; used_src = "intraday 1m"
-
         if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
@@ -121,9 +111,7 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
 
-    price_series = pd.Series(prices, name="preco")
-    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
-    return price_series, meta
+    return pd.Series(prices, name="preco"), pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
 
 
 # ---------- Pretty HTML table ----------
@@ -158,7 +146,7 @@ def main():
     st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
                        layout="wide", initial_sidebar_state="collapsed")
 
-    # ====== THEME / CSS ======
+    # ====== THEME / CSS (header mais ALTO e mais próximo do topo) ======
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -175,22 +163,36 @@ header[data-testid="stHeader"], header[data-testid="stHeader"] *,
 [data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
 header[data-testid="stHeader"]{box-shadow:none !important;}
 
-.block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
+/* subimos o conteúdo e aumentamos o banner */
+.block-container{
+  padding-top:.2rem;                 /* menos espaço no topo */
+  padding-bottom:.75rem;
+  max-width:none !important;
+  padding-left:1.25rem; padding-right:1.25rem;
+}
 
-/* ===== Header: logo à esquerda e título centralizado ===== */
+/* ===== Header: logo à esquerda e título central ===== */
 .app-header{
-  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
+  background:var(--stk-gold);
+  padding:28px 24px;                 /* MAIS ALTO */
+  border-radius:12px;
+  margin:6px 0 16px;                /* mais perto do topo */
+  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 8px 24px rgba(0,0,0,.18);
 }
 .header-inner{
-  position:relative; height:48px;
+  position:relative;
+  height:88px;                       /* MAIS ALTO */
   display:flex; align-items:center; justify-content:center;  /* centraliza o título */
 }
 .stk-logo{
-  position:absolute; left:16px; top:50%; transform:translateY(-50%);
-  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
+  position:absolute; left:20px; top:50%; transform:translateY(-50%);
+  height:64px;                       /* logo maior para acompanhar a faixa */
+  width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
 }
-.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
+.app-header h1{
+  margin:0; color:#fff; font-weight:800; letter-spacing:.4px;
+  font-size:2.2rem;                  /* opcionalmente maior */
+}
 
 /* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
@@ -402,6 +404,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
