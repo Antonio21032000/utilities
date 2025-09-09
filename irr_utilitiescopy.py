@@ -93,10 +93,7 @@ def main():
     st.markdown(
         """
 <style>
-/* ===== TIPOGRAFIA =====
-   -> Se tiver as fontes, coloque os .woff2 em ./fonts/
-   -> Fallback para Inter se não existirem
-*/
+/* ===== TIPOGRAFIA (opcional STK; cai em Inter como fallback) ===== */
 @font-face{
   font-family:"STK Display";
   src:url("fonts/STK-Display.woff2") format("woff2");
@@ -122,18 +119,24 @@ html, body, [class^="css"] {
   font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
-/* ===== Pinte o app todo (inclui topo/toolbar) ===== */
+/* ===== Pinte todo o topo/toolbar/decoração ===== */
 html, body,
 .stApp,
 [data-testid="stAppViewContainer"],
 [data-testid="stDecoration"],
-[data-testid="stHeader"]{
+header[data-testid="stHeader"],
+header[data-testid="stHeader"] * ,
+[data-testid="stToolbar"],
+[data-testid="stToolbar"] * {
   background:var(--stk-bg) !important;
 }
-[data-testid="stHeader"]{ box-shadow:none !important; }
+header[data-testid="stHeader"] { box-shadow:none !important; }
 
-/* Container padrão com menos respiro */
-.block-container{ padding-top:.75rem; padding-bottom:.75rem; }
+/* Container com menos respiro e largura máxima para simetria */
+.block-container{
+  padding-top:.75rem; padding-bottom:.75rem;
+  max-width: 1200px;  /* mantém tudo central e proporcional */
+}
 
 /* Cabeçalho chapado */
 .app-header{
@@ -147,11 +150,11 @@ html, body,
   font-weight:800; letter-spacing:.4px; color:#fff; margin:0;
 }
 
-/* Nota de rodapé — maior e mais legível */
+/* Nota de rodapé — centralizada e do mesmo width do gráfico */
 .footer-note{
   background:var(--stk-note-bg); border:1px solid var(--stk-note-bd);
-  border-radius:10px; padding:12px 16px; color:var(--stk-note-fg);
-  text-align:center; margin-top:16px; font-size:1.1rem; font-weight:600;
+  border-radius:10px; padding:14px 18px; color:var(--stk-note-fg);
+  text-align:center; margin:18px auto 8px; font-size:1.1rem; font-weight:600;
 }
 
 /* Garantir tipografia também no SVG dos gráficos */
@@ -310,7 +313,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ===== Gráfico =====
+        # ===== Gráfico (centralizado, simétrico) =====
         if len(ytm_clean) > 0:
             # Paleta suave (ordem acompanha o sort crescente)
             soft_palette = [
@@ -344,7 +347,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
 
             fig_irr.update_layout(
-                bargap=0.2,
+                bargap=0.18,
                 plot_bgcolor="#0e314a",
                 paper_bgcolor="#0e314a",
                 font=dict(
@@ -366,21 +369,23 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                     zeroline=False,
                     tickfont=dict(color="white"),
                 ),
-                margin=dict(l=30, r=30, t=10, b=70),
+                margin=dict(l=10, r=10, t=6, b=62),
                 showlegend=False,
+                height=520,
             )
 
-            st.plotly_chart(fig_irr, use_container_width=True)
-
-            # Nota de rodapé
-            st.markdown(
-                """
+            # Centro geométrico: usamos colunas para simetria
+            left, center, right = st.columns([1, 8, 1])
+            with center:
+                st.plotly_chart(fig_irr, use_container_width=True)
+                st.markdown(
+                    """
 <div class="footer-note">
   💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
 </div>
 """,
-                unsafe_allow_html=True,
-            )
+                    unsafe_allow_html=True,
+                )
         else:
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
 
