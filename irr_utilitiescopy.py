@@ -3,6 +3,7 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
+import plotly.graph_objects as go
 from datetime import datetime, date
 
 # Tenta importar numpy_financial
@@ -112,6 +113,37 @@ st.markdown("""
 
 st.markdown("<br>", unsafe_allow_html=True)
 
+def compute_irr(cashflows: np.ndarray) -> float:
+    """Calcula IRR usando numpy_financial ou método de bisseção como fallback"""
+    values = np.asarray(cashflows, dtype=float)
+    if npf is not None:
+        try:
+            irr_val = float(npf.irr(values))
+            return irr_val
+        except Exception:
+            pass
+
+    def npv(rate: float) -> float:
+        periods = np.arange(values.shape[0], dtype=float)
+        return float(np.sum(values / (1.0 + rate) ** periods))
+
+    low, high = -0.99, 10.0
+    f_low, f_high = npv(low), npv(high)
+    if np.sign(f_low) == np.sign(f_high):
+        return np.nan
+
+    mid = 0.0
+    for _ in range(100):
+        mid = (low + high) / 2.0
+        f_mid = npv(mid)
+        if abs(f_mid) < 1e-8:
+            return mid
+        if np.sign(f_low) * np.sign(f_mid) <= 0:
+            high, f_high = mid, f_mid
+        else:
+            low, f_low = mid, f_mid
+    return mid
+
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     """
     Calcula XIRR considerando datas específicas (similar ao Excel)
@@ -150,9 +182,9 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # Executar o código principal
 try:
-    with st.spinner("🔄 Carregando dados e calculando IRR..."):
+    with st.spinner("🔄 Carregando dados e calculando XIRR..."):
         
-        # Tickets a baixar do Yahoo (apenas os necessários para preços)
+        # Tickes a baixar do Yahoo (apenas os necessários para preços)
         tickers_for_prices = [
             # Consolidações por classes
             "CPLE3", "CPLE6",      # Copel
@@ -243,7 +275,7 @@ try:
             rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
 
         resultado = pd.DataFrame(rows).set_index("ticker")
-        # Reduz market_cap para milhões e mantém 6 primeiros dígitos
+        # Reduz market_cap para milhões e mantém 6 primeiros dígitos (conforme sua lógica)
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
         # === Carrega Excel com fluxos de caixa ===
@@ -273,9 +305,8 @@ try:
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors='coerce')
 
-        # === XIRR por ticker ===
+        # === XIRR por ticker (sem zeragem em 2025-12-31) ===
         irr_results = {}
-        
         for t in resultado.index:
             series_cf = df[t].dropna()
             if series_cf.empty:
@@ -302,14 +333,8 @@ try:
                 ytm_df.loc[ticker_adj, 'irr_aj'] = ((1 + ytm_df.loc[ticker_adj, 'irr']) / (1 + 0.045)) - 1
 
         ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
-        
+
         if len(ytm_clean) > 0:
-            # Criar paleta de cores
-            colors = [
-                "#708090", "#A9A9A9", "#BC987E", "#87A96B", "#8FBC8F",
-                "#D2B48C", "#DEB887", "#B0C4DE", "#C0C0C0", "#98A2B3", "#8B9DC3"
-            ]
-            
             plot_data = pd.DataFrame({
                 'empresa': ytm_clean.index,
                 'irr': ytm_clean['irr_aj'] * 100,
@@ -319,9 +344,7 @@ try:
                 plot_data,
                 x='empresa',
                 y='irr',
-                title="IRR Real por Empresa",
-                color='empresa',
-                color_discrete_sequence=colors,
+                title="IRR por Empresa (ajustada onde aplicável)",
                 text='irr'
             )
 
@@ -336,7 +359,7 @@ try:
                 paper_bgcolor=STK_AZUL,
                 font_color='white',
                 xaxis_title="Empresas",
-                yaxis_title="IRR Real (%)",
+                yaxis_title="IRR (%)",
                 height=600,
                 showlegend=False,
                 margin=dict(t=50, b=50, l=50, r=50),
@@ -356,7 +379,6 @@ try:
             )
 
             st.plotly_chart(fig_irr, use_container_width=True)
-
         else:
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
