@@ -132,10 +132,12 @@ header[data-testid="stHeader"] * ,
 }
 header[data-testid="stHeader"] { box-shadow:none !important; }
 
-/* Container com menos respiro e largura máxima para simetria */
+/* ===== Container: ocupar a largura toda ===== */
 .block-container{
   padding-top:.75rem; padding-bottom:.75rem;
-  max-width: 1200px;  /* mantém tudo central e proporcional */
+  max-width: none !important;   /* remove limite padrão */
+  padding-left: 1.25rem;        /* respiro lateral */
+  padding-right: 1.25rem;
 }
 
 /* Cabeçalho chapado */
@@ -150,11 +152,12 @@ header[data-testid="stHeader"] { box-shadow:none !important; }
   font-weight:800; letter-spacing:.4px; color:#fff; margin:0;
 }
 
-/* Nota de rodapé — centralizada e do mesmo width do gráfico */
+/* Nota de rodapé — largura total e visual consistente */
 .footer-note{
   background:var(--stk-note-bg); border:1px solid var(--stk-note-bd);
-  border-radius:10px; padding:14px 18px; color:var(--stk-note-fg);
-  text-align:center; margin:18px auto 8px; font-size:1.1rem; font-weight:600;
+  border-radius:10px; padding:16px 18px; color:var(--stk-note-fg);
+  text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600;
+  width: 100%;
 }
 
 /* Garantir tipografia também no SVG dos gráficos */
@@ -313,9 +316,9 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ===== Gráfico (centralizado, simétrico) =====
+        # ===== Gráfico largura total =====
         if len(ytm_clean) > 0:
-            # Paleta suave (ordem acompanha o sort crescente)
+            # Paleta suave
             soft_palette = [
                 "#9AA7B2", "#AEB8C2", "#C7B79A", "#A7C5A4", "#BFD7B5",
                 "#BBD0E6", "#D4DBF0", "#E2DBC5", "#E8E1CF", "#D3D9E6",
@@ -347,9 +350,10 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
 
             fig_irr.update_layout(
-                bargap=0.18,
+                bargap=0.12,                 # barras mais próximas para ocupar melhor
                 plot_bgcolor="#0e314a",
                 paper_bgcolor="#0e314a",
+                uniformtext_minsize=10,      # ajuda a evitar sobreposição
                 font=dict(
                     family="STK Text, Inter, system-ui, sans-serif",
                     color="white",
@@ -371,21 +375,21 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 ),
                 margin=dict(l=10, r=10, t=6, b=62),
                 showlegend=False,
-                height=520,
+                height=560,
             )
 
-            # Centro geométrico: usamos colunas para simetria
-            left, center, right = st.columns([1, 8, 1])
-            with center:
-                st.plotly_chart(fig_irr, use_container_width=True)
-                st.markdown(
-                    """
+            # Agora sem colunas: ocupa toda a largura
+            st.plotly_chart(fig_irr, use_container_width=True)
+
+            # Nota alinhada à mesma largura
+            st.markdown(
+                """
 <div class="footer-note">
   💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
 </div>
 """,
-                    unsafe_allow_html=True,
-                )
+                unsafe_allow_html=True,
+            )
         else:
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
 
@@ -395,6 +399,8 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
