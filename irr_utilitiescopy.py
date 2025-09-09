@@ -274,44 +274,57 @@ def main():
             st.dataframe(result_display, use_container_width=True)
 
             if len(ytm_clean) > 0:
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.metric("🏆 Maior IRR", 
-                             f"{ytm_clean.iloc[-1].name}", 
-                             f"{ytm_clean.iloc[-1]['irr_aj']*100:.2f}%")
-                with col2:
-                    st.metric("🔻 Menor IRR", 
-                             f"{ytm_clean.iloc[0].name}", 
-                             f"{ytm_clean.iloc[0]['irr_aj']*100:.2f}%")
-
                 plot_data = pd.DataFrame({
                     'empresa': ytm_clean.index,
                     'irr': ytm_clean['irr_aj'] * 100,
                 })
 
+                # Criar gráfico com design similar à imagem
                 fig_irr = px.bar(
                     plot_data,
                     x='empresa',
                     y='irr',
-                    title="IRR por Empresa (ajustada onde aplicável)",
                     text='irr',
                     color='irr',
-                    color_continuous_scale='RdYlGn'
+                    color_continuous_scale='Viridis'
                 )
 
                 fig_irr.update_traces(
                     texttemplate='%{text:.2f}%',
-                    textposition='outside'
+                    textposition='outside',
+                    textfont=dict(color='white', size=14),
+                    marker_line_width=0
                 )
 
                 fig_irr.update_layout(
+                    plot_bgcolor='rgba(30, 58, 95, 1)',
+                    paper_bgcolor='rgba(30, 58, 95, 1)',
+                    font_color='white',
                     xaxis_title="Empresas",
-                    yaxis_title="IRR (%)",
+                    yaxis_title="IRR Real (%)",
                     height=600,
-                    showlegend=False
+                    showlegend=False,
+                    yaxis=dict(
+                        range=[0, max(plot_data['irr']) * 1.15],
+                        gridcolor='rgba(255,255,255,0.1)',
+                        tickfont=dict(color='white')
+                    ),
+                    xaxis=dict(
+                        tickfont=dict(color='white', size=12)
+                    ),
+                    margin=dict(l=50, r=50, t=50, b=100)
                 )
 
+                fig_irr.update_coloraxes(showscale=False)
+
                 st.plotly_chart(fig_irr, use_container_width=True)
+                
+                # Nota de rodapé
+                st.markdown("""
+                <div class="footer-note">
+                    💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
+                </div>
+                """, unsafe_allow_html=True)
             else:
                 st.warning("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
 
