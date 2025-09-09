@@ -298,8 +298,8 @@ def main():
             )
 
             fig_irr.update_layout(
-                plot_bgcolor='rgba(30, 58, 95, 1)',
-                paper_bgcolor='rgba(30, 58, 95, 1)',
+                plot_bgcolor='rgba(16, 46, 70, 1)',
+                paper_bgcolor='rgba(16, 46, 70, 1)',
                 font_color='white',
                 xaxis_title="Empresas",
                 yaxis_title="IRR Real (%)",
@@ -334,5 +334,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
