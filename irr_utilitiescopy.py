@@ -89,14 +89,13 @@ def main():
         initial_sidebar_state="collapsed",
     )
 
-    # ===== CSS / Tema (igual ao 2º print) =====
+    # ===== CSS / Tema =====
     st.markdown(
         """
 <style>
 /* ===== TIPOGRAFIA =====
-   -> Coloque seus arquivos de fonte em ./fonts/
-   -> Nomes sugeridos: STK-Display.woff2 e STK-Text.woff2
-   -> Se não existir, cai no fallback Inter automaticamente
+   -> Se tiver as fontes, coloque os .woff2 em ./fonts/
+   -> Fallback para Inter se não existirem
 */
 @font-face{
   font-family:"STK Display";
@@ -108,7 +107,6 @@ def main():
   src:url("fonts/STK-Text.woff2") format("woff2");
   font-weight:300 700; font-style:normal; font-display:swap;
 }
-/* Fallback rápido via Google Fonts */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
 :root{
@@ -124,8 +122,15 @@ html, body, [class^="css"] {
   font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
 }
 
-/* Fundo da página */
-.stApp{ background:var(--stk-bg); }
+/* ===== Pinte o app todo (inclui topo/toolbar) ===== */
+html, body,
+.stApp,
+[data-testid="stAppViewContainer"],
+[data-testid="stDecoration"],
+[data-testid="stHeader"]{
+  background:var(--stk-bg) !important;
+}
+[data-testid="stHeader"]{ box-shadow:none !important; }
 
 /* Container padrão com menos respiro */
 .block-container{ padding-top:.75rem; padding-bottom:.75rem; }
@@ -142,14 +147,14 @@ html, body, [class^="css"] {
   font-weight:800; letter-spacing:.4px; color:#fff; margin:0;
 }
 
-/* Nota de rodapé */
+/* Nota de rodapé — maior e mais legível */
 .footer-note{
   background:var(--stk-note-bg); border:1px solid var(--stk-note-bd);
-  border-radius:10px; padding:10px 14px; color:var(--stk-note-fg);
-  text-align:center; margin-top:16px; font-size:.9rem;
+  border-radius:10px; padding:12px 16px; color:var(--stk-note-fg);
+  text-align:center; margin-top:16px; font-size:1.1rem; font-weight:600;
 }
 
-/* Garantir tipografia também no SVG */
+/* Garantir tipografia também no SVG dos gráficos */
 svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 </style>
 """,
@@ -305,7 +310,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ===== Gráfico (visual do 2º print) =====
+        # ===== Gráfico =====
         if len(ytm_clean) > 0:
             # Paleta suave (ordem acompanha o sort crescente)
             soft_palette = [
@@ -385,7 +390,6 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
-
 
 
 
