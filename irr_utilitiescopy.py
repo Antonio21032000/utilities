@@ -80,6 +80,73 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 
+def fetch_latest_prices_intraday_with_fallback(tickers):
+    """
+    Retorna:
+      - prices (pd.Series): último preço por ticker (sem sufixo .SA)
+      - meta (pd.DataFrame): Fonte (intraday/daily) e Timestamp por ticker
+    Tenta 1m intraday (period=1d, interval=1m). Quando não houver valor, cai para daily close (5d).
+    """
+    tickers_sa = [f"{t}.SA" for t in tickers]
+
+    # --- Tentativa 1: intraday 1m (batch)
+    prices = {}
+    source = {}
+    ts_used = {}
+
+    try:
+        intraday = yf.download(
+            tickers_sa, period="1d", interval="1m", progress=False
+        )["Close"]
+        if isinstance(intraday, pd.Series):
+            intraday = intraday.to_frame()
+        intraday = intraday.ffill()
+        # timestamp intradiário mais recente com pelo menos um dado
+        ts1m = intraday.dropna(how="all").index.max()
+    except Exception:
+        intraday = pd.DataFrame()
+        ts1m = None
+
+    # --- Fallback diário (batch)
+    try:
+        daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
+        tsd = daily.index[-1] if len(daily.index) else None
+    except Exception:
+        daily = pd.DataFrame()
+        tsd = None
+
+    for t, tsa in zip(tickers, tickers_sa):
+        val = np.nan
+        used_ts = None
+        used_src = None
+
+        # tenta intraday
+        if ts1m is not None and tsa in getattr(intraday, "columns", []):
+            v = intraday.loc[ts1m, tsa]
+            if pd.notna(v):
+                val = float(v)
+                used_ts = ts1m
+                used_src = "intraday 1m"
+
+        # fallback diário
+        if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
+            v = daily.iloc[-1][tsa]
+            if pd.notna(v):
+                val = float(v)
+                used_ts = tsd
+                used_src = "daily close"
+
+        prices[t] = val
+        source[t] = used_src if used_src is not None else "N/A"
+        ts_used[t] = used_ts
+
+    price_series = pd.Series(prices, name="preco")
+    meta = pd.DataFrame(
+        {"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)}
+    )
+    return price_series, meta
+
+
 def main():
     # ===== Configuração da página =====
     st.set_page_config(
@@ -171,7 +238,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
     st.markdown('<div class="app-header"><h1>IRR Real</h1></div>', unsafe_allow_html=True)
 
     try:
-        # ===== Preços Yahoo (último fechamento disponível) =====
+        # ===== Universo de tickers =====
         tickers_for_prices = [
             # Consolidações por classes
             "CPLE3", "CPLE6",      # Copel
@@ -181,11 +248,11 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3",
         ]
 
-        tickers_sa = [f"{t}.SA" for t in tickers_for_prices]
-        closes = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
-        last_close = closes.iloc[-1]
-        last_close.index = [t.replace(".SA", "") for t in last_close.index]
-        prices = last_close.astype(float)
+        # ===== PREÇOS: intraday 1m + fallback =====
+        intraday_prices, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
+
+        # tira qualquer .SA do índice (já veio limpo)
+        prices = intraday_prices.astype(float)
 
         # ===== Quantidade de ações por classe =====
         shares_classes = {
@@ -256,8 +323,35 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
 
         resultado = pd.DataFrame(rows).set_index("ticker")
-        # Reduz market_cap para milhões e mantém 6 primeiros dígitos
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
+
+        # ===== TABELA: preços usados por ativo =====
+        # pegamos apenas os tickers realmente usados (inclusive os de consolidação)
+        price_table_order = [
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"
+        ]
+        table = pd.DataFrame({
+            "Preço": prices.reindex(price_table_order),
+        })
+        table["Fonte"] = meta["Fonte"].reindex(price_table_order)
+        # timestamps formatados (se houver tz, exibe local)
+        def fmt_ts(ts):
+            if pd.isna(ts):
+                return ""
+            try:
+                return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return str(ts)
+        table["Timestamp"] = meta["Timestamp"].reindex(price_table_order).map(fmt_ts)
+        table = table.rename_axis("Ticker").reset_index()
+
+        st.subheader("🕒 Preços usados (Yahoo Finance)")
+        st.dataframe(
+            table.style.format({"Preço": "{:,.2f}"}),
+            use_container_width=True,
+            hide_index=True
+        )
 
         # ===== Carrega Excel com fluxos de caixa =====
         try:
@@ -288,7 +382,6 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
         # ===== XIRR por ticker (sem zeragem em 2025-12-31) =====
         irr_results = {}
-
         for t in resultado.index:
             series_cf = df[t].dropna()
             if series_cf.empty:
@@ -400,4 +493,5 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
+
 
