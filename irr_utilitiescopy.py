@@ -135,36 +135,34 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
 
 
 def build_price_table_html(df: pd.DataFrame) -> str:
-    """Gera uma tabela HTML dark, combinando com o tema do app."""
-    def row_html(r):
-        fonte = r.get("Fonte", "") or ""
+    """Gera uma tabela HTML dark, compatível com o tema do app (sem indentação que vira code-block)."""
+    rows_html = []
+    for _, r in df.iterrows():
+        fonte = (r.get("Fonte") or "")
         badge_class = "badge-live" if "intraday" in fonte else "badge-daily"
         preco = "" if pd.isna(r["Preço"]) else f"{r['Preço']:.2f}"
-        ts = r.get("Timestamp", "") or ""
-        return f"""
-        <tr>
-          <td>{r['Ticker']}</td>
-          <td class="num">{preco}</td>
-          <td><span class="badge {badge_class}">{fonte}</span></td>
-          <td>{ts}</td>
-        </tr>"""
+        ts = r.get("Timestamp") or ""
+        rows_html.append(
+            "<tr>"
+            f"<td>{r['Ticker']}</td>"
+            f"<td class='num'>{preco}</td>"
+            f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
+            f"<td>{ts}</td>"
+            "</tr>"
+        )
 
-    rows = "\n".join(df.apply(row_html, axis=1).tolist())
-
-    return f"""
-<div class="table-wrap">
-  <div class="table-title">🕒 Preços usados (Yahoo Finance)</div>
-  <table class="styled-table">
-    <thead>
-      <tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th></tr>
-    </thead>
-    <tbody>
-      {rows}
-    </tbody>
-  </table>
-  <div class="table-note">intraday 1m pode ter atraso de ~15 min • “daily close” = último fechamento.</div>
-</div>
-"""
+    html = (
+        "<div class='table-wrap'>"
+        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
+        "<table class='styled-table'>"
+        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th></tr></thead>"
+        "<tbody>"
+        + "".join(rows_html) +
+        "</tbody></table>"
+        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • “daily close” = último fechamento.</div>"
+        "</div>"
+    )
+    return html
 
 
 def main():
@@ -180,97 +178,48 @@ def main():
     st.markdown(
         """
 <style>
-/* ===== TIPOGRAFIA (opcional STK; cai em Inter como fallback) ===== */
-@font-face{
-  font-family:"STK Display";
-  src:url("fonts/STK-Display.woff2") format("woff2");
-  font-weight:600 800; font-style:normal; font-display:swap;
-}
-@font-face{
-  font-family:"STK Text";
-  src:url("fonts/STK-Text.woff2") format("woff2");
-  font-weight:300 700; font-style:normal; font-display:swap;
-}
+@font-face{font-family:"STK Display";src:url("fonts/STK-Display.woff2") format("woff2");font-weight:600 800;font-style:normal;font-display:swap;}
+@font-face{font-family:"STK Text";src:url("fonts/STK-Text.woff2") format("woff2");font-weight:300 700;font-style:normal;font-display:swap;}
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 
 :root{
-  --stk-bg:#0e314a;         /* azul de fundo */
-  --stk-gold:#BD8A25;       /* cabeçalho mostarda */
-  --stk-grid:rgba(255,255,255,.12);
-  --stk-note-bg:rgba(255,209,84,.06);
-  --stk-note-bd:rgba(255,209,84,.25);
-  --stk-note-fg:#FFD14F;
-  --panel:#0f3a58;          /* blocos/boxes */
+  --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
+  --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
 }
 
-html, body, [class^="css"] { font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
-
-/* ===== Pinte todo o topo/toolbar/decoração ===== */
+html, body, [class^="css"]{font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
 html, body, .stApp,
 [data-testid="stAppViewContainer"], [data-testid="stDecoration"],
 header[data-testid="stHeader"], header[data-testid="stHeader"] *,
-[data-testid="stToolbar"], [data-testid="stToolbar"] * {
-  background:var(--stk-bg) !important;
-}
-header[data-testid="stHeader"] { box-shadow:none !important; }
+[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
+header[data-testid="stHeader"]{box-shadow:none !important;}
 
-/* ===== Container: ocupar a largura toda ===== */
-.block-container{
-  padding-top:.75rem; padding-bottom:.75rem;
-  max-width: none !important;
-  padding-left: 1.25rem; padding-right: 1.25rem;
-}
+.block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
 
-/* Cabeçalho chapado */
-.app-header{
-  background:var(--stk-gold);
-  padding:28px 24px; border-radius:12px; text-align:center;
-  margin:16px 0 24px;
-  box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
-}
-.app-header h1{
-  font-family:"STK Display", Inter, system-ui, sans-serif;
-  font-weight:800; letter-spacing:.4px; color:#fff; margin:0;
-}
+.app-header{background:var(--stk-gold); padding:28px 24px; border-radius:12px; text-align:center; margin:16px 0 24px;
+            box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);}
+.app-header h1{font-family:"STK Display", Inter, system-ui, sans-serif; font-weight:800; letter-spacing:.4px; color:#fff; margin:0;}
 
-/* Nota de rodapé */
-.footer-note{
-  background:var(--stk-note-bg); border:1px solid var(--stk-note-bd);
-  border-radius:10px; padding:16px 18px; color:var(--stk-note-fg);
-  text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600;
-  width: 100%;
-}
+.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px; color:var(--stk-note-fg);
+            text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
 
 /* ===== Tabela dark custom ===== */
-.table-wrap{ margin: 14px 0 8px; }
-.table-title{ color:#cfe8ff; font-weight:700; margin: 0 0 8px; font-size:1.1rem; }
-.styled-table{
-  width:100%; border-collapse:separate; border-spacing:0;
-  background: rgba(255,255,255,.03);
-  border:1px solid rgba(255,255,255,.08);
-  border-radius:12px; overflow:hidden;
-}
-.styled-table thead th{
-  background: rgba(255,255,255,.06);
-  color:#fff; text-align:left; padding:12px 14px; font-weight:600;
-  border-bottom:1px solid rgba(255,255,255,.08);
-}
-.styled-table tbody td{
-  color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);
-}
-.styled-table tbody tr:nth-child(even){ background: rgba(255,255,255,.02); }
-.styled-table tbody tr:last-child td{ border-bottom:none; }
-.styled-table td.num{ text-align:right; font-variant-numeric: tabular-nums; }
-.badge{
-  display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem;
-  border:1px solid transparent;
-}
-.badge-live{ background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25); }
-.badge-daily{ background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25); }
-.table-note{ color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px; }
+.table-wrap{margin:14px 0 8px;}
+.table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
+.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
+              border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
+.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600;
+                       border-bottom:1px solid rgba(255,255,255,.08);}
+.styled-table tbody td{color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);}
+.styled-table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
+.styled-table tbody tr:last-child td{border-bottom:none;}
+.styled-table td.num{text-align:right; font-variant-numeric:tabular-nums;}
+.badge{display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem; border:1px solid transparent;}
+.badge-live{background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25);}
+.badge-daily{background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25);}
+.table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 
-/* Tipografia também no SVG */
-svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
+svg text{font-family:"STK Text", Inter, system-ui, sans-serif !important;}
 </style>
 """,
         unsafe_allow_html=True,
@@ -405,8 +354,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             }).reset_index(drop=True)
 
             fig_irr = go.Figure(go.Bar(
-                x=plot_data["empresa"],
-                y=plot_data["irr"],
+                x=plot_data["empresa"], y=plot_data["irr"],
                 text=[f"{v:.2f}%" for v in plot_data["irr"]],
                 marker=dict(color=soft_palette[:len(plot_data)], line=dict(width=0)),
                 hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
@@ -428,7 +376,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
             return
 
-        # ===== TABELA (DEPOIS DO GRÁFICO), dark custom =====
+        # ===== TABELA (DEPOIS DO GRÁFICO) =====
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -442,15 +390,12 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
         tbl = tbl.rename_axis("Ticker").reset_index()
 
         html_table = build_price_table_html(tbl)
+        # importante: usar markdown com unsafe_allow_html e string SEM indentação
         st.markdown(html_table, unsafe_allow_html=True)
 
         # ===== Nota de refresh =====
         st.markdown(
-            """
-<div class="footer-note">
-  💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
-</div>
-""",
+            "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
         )
 
@@ -460,6 +405,5 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
-
 
 
