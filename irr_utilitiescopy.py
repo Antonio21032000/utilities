@@ -2,13 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# Exemplo de dados simulados baseados no ytm_clean
-# Substitua por seus dados reais
-ytm_clean = pd.DataFrame({
-    'irr_aj': [0.0524, 0.0687, 0.0789, 0.0856, 0.0923, 0.1045, 0.1123, 0.1234, 0.1345, 0.1456, 0.1567]
-}, index=['ALOS3', 'MULT3', 'EGIE3', 'ELET3', 'ENEV3', 'NEOE3', 'SBSP3', 'EQTL3', 'CPLE6', 'IGTI11', 'ENGI11'])
+# Assumindo que ytm_clean já foi calculado pelo código principal
+# ytm_clean vem do processo de cálculo do IRR/XIRR com dados reais
 
-# Criar o gráfico
+# Criar o gráfico usando os dados reais do ytm_clean
 plot_data = pd.DataFrame({
     'empresa': ytm_clean.index,
     'irr': ytm_clean['irr_aj'] * 100,  # Convertendo para percentual
@@ -39,3 +36,4 @@ fig_irr.update_layout(
 
 # Exibir no Streamlit
 st.plotly_chart(fig_irr, use_container_width=True)
+
