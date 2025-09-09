@@ -101,27 +101,6 @@ st.markdown("""
         .title-text, .stPlotlyChart {
             color: inherit !important;
         }
-        
-        /* Estilo para tabelas */
-        .dataframe {
-            color: white !important;
-            background-color: rgba(255, 255, 255, 0.1) !important;
-        }
-        
-        .info-box {
-            background-color: rgba(201, 140, 46, 0.1);
-            padding: 15px;
-            border-radius: 8px;
-            margin: 10px 0;
-            border-left: 4px solid #C98C2E;
-        }
-        
-        .result-box {
-            background-color: rgba(255, 255, 255, 0.05);
-            padding: 20px;
-            border-radius: 10px;
-            margin: 15px 0;
-        }
     </style>
 """, unsafe_allow_html=True)
 
@@ -490,4 +469,5 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
+
 
