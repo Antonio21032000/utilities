@@ -177,13 +177,20 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
 
-/* Header com logo alinhada à esquerda */
-.app-header{background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-            margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
-            text-align:left;}
-.header-inner{display:flex; align-items:center; justify-content:flex-start; gap:14px;}
-.stk-logo{height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12)); margin-right:4px;}
-.app-header h1{font-weight:800; letter-spacing:.4px; color:#fff; margin:0;}
+/* ===== Header: logo à esquerda e título centralizado ===== */
+.app-header{
+  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
+  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
+}
+.header-inner{
+  position:relative; height:48px;
+  display:flex; align-items:center; justify-content:center;  /* centraliza o título */
+}
+.stk-logo{
+  position:absolute; left:16px; top:50%; transform:translateY(-50%);
+  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
+}
+.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
 
 /* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
@@ -210,7 +217,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # ====== Header com logo ======
+    # ====== Header com logo (esquerda) e título (centro) ======
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
@@ -395,6 +402,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
