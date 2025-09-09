@@ -316,7 +316,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ===== Gráfico largura total =====
+        # ===== Gráfico (largura total, eixo Y iniciando em 4) =====
         if len(ytm_clean) > 0:
             # Paleta suave
             soft_palette = [
@@ -347,13 +347,15 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 textfont=dict(color="white", size=14),
             )
 
+            # Escala: de 4 até ~10% acima do máximo (mínimo teto 12)
             ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
+            ymin = 4.0
 
             fig_irr.update_layout(
-                bargap=0.12,                 # barras mais próximas para ocupar melhor
+                bargap=0.12,
                 plot_bgcolor="#0e314a",
                 paper_bgcolor="#0e314a",
-                uniformtext_minsize=10,      # ajuda a evitar sobreposição
+                uniformtext_minsize=10,
                 font=dict(
                     family="STK Text, Inter, system-ui, sans-serif",
                     color="white",
@@ -368,7 +370,8 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 ),
                 yaxis=dict(
                     title="IRR Real (%)",
-                    range=[0, ymax],
+                    range=[ymin, ymax],
+                    dtick=1,
                     gridcolor="rgba(255,255,255,.12)",
                     zeroline=False,
                     tickfont=dict(color="white"),
@@ -378,10 +381,8 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 height=560,
             )
 
-            # Agora sem colunas: ocupa toda a largura
             st.plotly_chart(fig_irr, use_container_width=True)
 
-            # Nota alinhada à mesma largura
             st.markdown(
                 """
 <div class="footer-note">
@@ -399,8 +400,4 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
-
-
-
-
 
