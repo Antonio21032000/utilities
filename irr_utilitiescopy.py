@@ -4,6 +4,8 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date
+import base64
+import os
 
 # Tenta importar numpy_financial
 try:
@@ -135,7 +137,7 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
 
 
 def build_price_table_html(df: pd.DataFrame) -> str:
-    """Gera uma tabela HTML dark, compatível com o tema do app (sem indentação que vira code-block)."""
+    """Gera uma tabela HTML dark, compatível com o tema do app."""
     rows_html = []
     for _, r in df.iterrows():
         fonte = (r.get("Fonte") or "")
@@ -196,8 +198,10 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
 
-.app-header{background:var(--stk-gold); padding:28px 24px; border-radius:12px; text-align:center; margin:16px 0 24px;
+.app-header{background:var(--stk-gold); padding:18px 20px; border-radius:12px; text-align:center; margin:16px 0 16px;
             box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);}
+.header-inner{display:flex; align-items:center; justify-content:center; gap:16px;}
+.stk-logo{height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));}
 .app-header h1{font-family:"STK Display", Inter, system-ui, sans-serif; font-weight:800; letter-spacing:.4px; color:#fff; margin:0;}
 
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px; color:var(--stk-note-fg);
@@ -225,8 +229,28 @@ svg text{font-family:"STK Text", Inter, system-ui, sans-serif !important;}
         unsafe_allow_html=True,
     )
 
-    # ===== Header =====
-    st.markdown('<div class="app-header"><h1>IRR Real</h1></div>', unsafe_allow_html=True)
+    # ===== Header com LOGO =====
+    LOGO_PATH = "STKGRAFICO.png"  # ajuste se estiver em outra pasta, ex.: "assets/STKGRAFICO.png"
+    logo_b64 = None
+    if os.path.exists(LOGO_PATH):
+        with open(LOGO_PATH, "rb") as f:
+            logo_b64 = base64.b64encode(f.read()).decode("utf-8")
+
+    if logo_b64:
+        st.markdown(
+            f"""
+<div class="app-header">
+  <div class="header-inner">
+    <img class="stk-logo" src="data:image/png;base64,{logo_b64}" alt="STK logo" />
+    <h1>IRR Real</h1>
+  </div>
+</div>
+""",
+            unsafe_allow_html=True,
+        )
+    else:
+        # fallback sem logo
+        st.markdown('<div class="app-header"><h1>IRR Real</h1></div>', unsafe_allow_html=True)
 
     try:
         # ===== Universo de tickers =====
@@ -376,7 +400,7 @@ svg text{font-family:"STK Text", Inter, system-ui, sans-serif !important;}
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
             return
 
-        # ===== TABELA (DEPOIS DO GRÁFICO) =====
+        # ===== TABELA (depois do gráfico) =====
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -390,7 +414,6 @@ svg text{font-family:"STK Text", Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
 
         html_table = build_price_table_html(tbl)
-        # importante: usar markdown com unsafe_allow_html e string SEM indentação
         st.markdown(html_table, unsafe_allow_html=True)
 
         # ===== Nota de refresh =====
@@ -405,5 +428,7 @@ svg text{font-family:"STK Text", Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
+
 
 
