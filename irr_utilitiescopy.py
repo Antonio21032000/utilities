@@ -158,40 +158,22 @@ st.dataframe(
     hide_index=True
 )
 
-# Informações adicionais com estilo escuro
+# Informações adicionais
 st.markdown("---")
-st.markdown("### ℹ️ Informações sobre Ajustes")
+st.subheader("ℹ️ Informações sobre Ajustes")
 
 col1, col2 = st.columns(2)
 
 with col1:
-    st.markdown("""
-    <div style="background-color: #2c5282; padding: 15px; border-radius: 10px; color: white;">
-        <h4>💼 IRR Nominal</h4>
-        <p>Taxa calculada diretamente dos fluxos de caixa projetados.</p>
-        <p><strong>Aplicada para:</strong> EGIE3, ENGI11, ENEV3, SBSP3, CPLE6, NEOE3, EQTL3</p>
-    </div>
-    """, unsafe_allow_html=True)
+    st.info("""
+    **IRR Nominal:** Taxa calculada diretamente dos fluxos de caixa projetados.
+    
+    Aplicada para: ENEV3, SBSP3, NEOE3, EGIE3, EQTL3, CPLE6, ELET3
+    """)
 
 with col2:
-    st.markdown("""
-    <div style="background-color: #d4a574; padding: 15px; border-radius: 10px; color: white;">
-        <h4>📊 IRR Real</h4>
-        <p>Taxa ajustada por deflator de 4,5% a.a. para considerar inflação.</p>
-        <p><strong>Aplicada para:</strong> MULT3, ALOS3, IGTI11</p>
-        <p><strong>Fórmula:</strong> ((1 + IRR_nominal) / (1 + 0,045)) - 1</p>
-    </div>
-    """, unsafe_allow_html=True)
-
-# Nota sobre atualização (similar à imagem)
-st.markdown("---")
-st.markdown("""
-<div style="background-color: #d4a574; padding: 10px; border-radius: 5px; text-align: center; color: white; margin: 20px 0;">
-    💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
-</div>
-""", unsafe_allow_html=True)
-
-# Remove o gráfico de distribuição e o footer desnecessáriosal:** Taxa ajustada por deflator de 4,5% a.a. para considerar inflação.
+    st.warning("""
+    **IRR Real:** Taxa ajustada por deflator de 4,5% a.a. para considerar inflação.
     
     Aplicada para: MULT3, ALOS3, IGTI11
     
