@@ -3,7 +3,6 @@ import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.express as px
-import plotly.graph_objects as go
 from datetime import datetime, date
 
 # Tenta importar numpy_financial
@@ -14,7 +13,7 @@ except Exception:
 
 # Configurar página do Streamlit
 st.set_page_config(
-    page_title="IRR Real - Dashboard Completo",
+    page_title="IRR Real",
     layout="wide",
     initial_sidebar_state="collapsed"
 )
@@ -107,42 +106,11 @@ st.markdown("""
 # Título personalizado
 st.markdown("""
     <div class="title-container">
-        <h1 class="title-text" style="color: white !important;">IRR Real - Dashboard Completo</h1>
+        <h1 class="title-text" style="color: white !important;">IRR Real</h1>
     </div>
 """, unsafe_allow_html=True)
 
 st.markdown("<br>", unsafe_allow_html=True)
-
-def compute_irr(cashflows: np.ndarray) -> float:
-    """Calcula IRR usando numpy_financial ou método de bisseção como fallback"""
-    values = np.asarray(cashflows, dtype=float)
-    if npf is not None:
-        try:
-            irr_val = float(npf.irr(values))
-            return irr_val
-        except Exception:
-            pass
-
-    def npv(rate: float) -> float:
-        periods = np.arange(values.shape[0], dtype=float)
-        return float(np.sum(values / (1.0 + rate) ** periods))
-
-    low, high = -0.99, 10.0
-    f_low, f_high = npv(low), npv(high)
-    if np.sign(f_low) == np.sign(f_high):
-        return np.nan
-
-    mid = 0.0
-    for _ in range(100):
-        mid = (low + high) / 2.0
-        f_mid = npv(mid)
-        if abs(f_mid) < 1e-8:
-            return mid
-        if np.sign(f_low) * np.sign(f_mid) <= 0:
-            high, f_high = mid, f_mid
-        else:
-            low, f_low = mid, f_mid
-    return mid
 
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     """
@@ -182,7 +150,7 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # Executar o código principal
 try:
-    with st.spinner("🔄 Carregando dados e calculando XIRR..."):
+    with st.spinner("🔄 Carregando dados e calculando IRR..."):
         
         # Tickets a baixar do Yahoo (apenas os necessários para preços)
         tickers_for_prices = [
@@ -278,9 +246,6 @@ try:
         # Reduz market_cap para milhões e mantém 6 primeiros dígitos
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        st.markdown("### 📊 Dados de Market Cap (em milhões, 6 primeiros dígitos)")
-        st.dataframe(resultado, use_container_width=True)
-
         # === Carrega Excel com fluxos de caixa ===
         try:
             df = pd.read_excel('irrdash3.xlsx')
@@ -308,15 +273,8 @@ try:
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors='coerce')
 
-        st.markdown("### 💰 Fluxos de Caixa por Empresa")
-        cashflow_display = df[resultado.index].copy()
-        st.dataframe(cashflow_display, use_container_width=True)
-
-        # === XIRR por ticker (sem zeragem em 2025-12-31) ===
-        st.markdown("### 🧮 Calculando XIRR para cada empresa (com datas específicas)")
-        
+        # === XIRR por ticker ===
         irr_results = {}
-        details_container = st.container()
         
         for t in resultado.index:
             series_cf = df[t].dropna()
@@ -333,122 +291,71 @@ try:
                 future_dt = date(today.year + i - 1, 12, 31)
                 dates_list.append(future_dt)
 
-            cf_with_dates = pd.DataFrame({
-                'Data': dates_list,
-                'Fluxo_de_Caixa': cashflows,
-                'Ano': [d.year for d in dates_list]
-            })
-
-            with details_container:
-                st.markdown(f"<div class='info-box'>", unsafe_allow_html=True)
-                st.markdown(f"**📊 {t} - Fluxos de caixa com datas (para XIRR):**")
-                st.dataframe(cf_with_dates, use_container_width=True)
-
             irr_results[t] = compute_xirr(cashflows, dates_list)
-            
-            with details_container:
-                if pd.isna(irr_results[t]):
-                    st.markdown("  ➤ **XIRR calculado:** N/A")
-                else:
-                    st.markdown(f"  ➤ **XIRR calculado:** {irr_results[t]:.4f} ({irr_results[t]*100:.2f}%)")
-                st.markdown("</div>", unsafe_allow_html=True)
-                st.markdown("---")
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient='index', columns=['irr'])
         ytm_df['irr_aj'] = ytm_df['irr']  # inicial
 
         # Ajuste de IRR real SOMENTE para MULT3, ALOS3 e IGTI11 (deflator 4,5% a.a.)
-        st.markdown("### 🔧 Aplicando ajuste de IRR real (deflator 4,5% a.a.)")
-        st.markdown("<div class='info-box'>", unsafe_allow_html=True)
-        st.markdown("**Ajuste aplicado em:** MULT3, ALOS3 e IGTI11")
-        
         for ticker_adj in ['MULT3', 'ALOS3', 'IGTI11']:
             if ticker_adj in ytm_df.index and not pd.isna(ytm_df.loc[ticker_adj, 'irr']):
                 ytm_df.loc[ticker_adj, 'irr_aj'] = ((1 + ytm_df.loc[ticker_adj, 'irr']) / (1 + 0.045)) - 1
-                st.markdown(f"  **{ticker_adj}:** {ytm_df.loc[ticker_adj, 'irr_aj']*100:.2f}% (real)")
-        
-        st.markdown("</div>", unsafe_allow_html=True)
 
         ytm_clean = ytm_df[['irr_aj']].dropna().sort_values('irr_aj', ascending=True)
-
-        st.markdown("### 📈 Resultados Finais - IRR (ajustada onde aplicável)")
         
         if len(ytm_clean) > 0:
-            # Criar colunas para layout
-            col1, col2 = st.columns([2, 1])
+            # Criar paleta de cores
+            colors = [
+                "#708090", "#A9A9A9", "#BC987E", "#87A96B", "#8FBC8F",
+                "#D2B48C", "#DEB887", "#B0C4DE", "#C0C0C0", "#98A2B3", "#8B9DC3"
+            ]
             
-            with col1:
-                # Criar paleta de cores
-                colors = [
-                    "#708090", "#A9A9A9", "#BC987E", "#87A96B", "#8FBC8F",
-                    "#D2B48C", "#DEB887", "#B0C4DE", "#C0C0C0", "#98A2B3", "#8B9DC3"
-                ]
-                
-                plot_data = pd.DataFrame({
-                    'empresa': ytm_clean.index,
-                    'irr': ytm_clean['irr_aj'] * 100,
-                })
+            plot_data = pd.DataFrame({
+                'empresa': ytm_clean.index,
+                'irr': ytm_clean['irr_aj'] * 100,
+            })
 
-                fig_irr = px.bar(
-                    plot_data,
-                    x='empresa',
-                    y='irr',
-                    title="IRR por Empresa (ajustada onde aplicável)",
-                    color='empresa',
-                    color_discrete_sequence=colors,
-                    text='irr'
+            fig_irr = px.bar(
+                plot_data,
+                x='empresa',
+                y='irr',
+                title="IRR Real por Empresa",
+                color='empresa',
+                color_discrete_sequence=colors,
+                text='irr'
+            )
+
+            fig_irr.update_traces(
+                texttemplate='%{text:.2f}%',
+                textposition='outside',
+                textfont=dict(color='white', size=14)
+            )
+
+            fig_irr.update_layout(
+                plot_bgcolor=STK_AZUL,
+                paper_bgcolor=STK_AZUL,
+                font_color='white',
+                xaxis_title="Empresas",
+                yaxis_title="IRR Real (%)",
+                height=600,
+                showlegend=False,
+                margin=dict(t=50, b=50, l=50, r=50),
+                xaxis=dict(
+                    showgrid=True,
+                    gridcolor='rgba(255, 255, 255, 0.1)',
+                    tickfont=dict(color='white', size=14),
+                    title_font=dict(color='white', size=16)
+                ),
+                yaxis=dict(
+                    showgrid=True,
+                    gridcolor='rgba(255, 255, 255, 0.1)',
+                    tickfont=dict(color='white', size=14),
+                    tickformat='.2f',
+                    title_font=dict(color='white', size=16)
                 )
+            )
 
-                fig_irr.update_traces(
-                    texttemplate='%{text:.2f}%',
-                    textposition='outside',
-                    textfont=dict(color='white', size=12)
-                )
-
-                fig_irr.update_layout(
-                    plot_bgcolor=STK_AZUL,
-                    paper_bgcolor=STK_AZUL,
-                    font_color='white',
-                    xaxis_title="Empresas",
-                    yaxis_title="IRR (%)",
-                    height=600,
-                    showlegend=False,
-                    margin=dict(t=50, b=50, l=50, r=50),
-                    xaxis=dict(
-                        showgrid=True,
-                        gridcolor='rgba(255, 255, 255, 0.1)',
-                        tickfont=dict(color='white', size=12),
-                        title_font=dict(color='white', size=14)
-                    ),
-                    yaxis=dict(
-                        showgrid=True,
-                        gridcolor='rgba(255, 255, 255, 0.1)',
-                        tickfont=dict(color='white', size=12),
-                        tickformat='.2f',
-                        title_font=dict(color='white', size=14)
-                    )
-                )
-
-                st.plotly_chart(fig_irr, use_container_width=True)
-            
-            with col2:
-                st.markdown("<div class='result-box'>", unsafe_allow_html=True)
-                st.markdown("#### 🏆 Ranking IRR")
-                
-                for i, (empresa, row) in enumerate(ytm_clean.iterrows(), 1):
-                    emoji = "🥇" if i == len(ytm_clean) else "🥈" if i == len(ytm_clean)-1 else "🥉" if i == len(ytm_clean)-2 else "📊"
-                    st.markdown(f"{emoji} **{empresa}:** {row['irr_aj']*100:.2f}%")
-                
-                st.markdown("</div>", unsafe_allow_html=True)
-                
-                # Resumo estatístico
-                st.markdown("<div class='result-box'>", unsafe_allow_html=True)
-                st.markdown("#### 📊 Estatísticas")
-                st.markdown(f"**Maior IRR:** {ytm_clean.iloc[-1].name} ({ytm_clean.iloc[-1]['irr_aj']*100:.2f}%)")
-                st.markdown(f"**Menor IRR:** {ytm_clean.iloc[0].name} ({ytm_clean.iloc[0]['irr_aj']*100:.2f}%)")
-                st.markdown(f"**IRR Média:** {ytm_clean['irr_aj'].mean()*100:.2f}%")
-                st.markdown(f"**IRR Mediana:** {ytm_clean['irr_aj'].median()*100:.2f}%")
-                st.markdown("</div>", unsafe_allow_html=True)
+            st.plotly_chart(fig_irr, use_container_width=True)
 
         else:
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa. Verifique os dados do arquivo Excel.")
@@ -469,5 +376,4 @@ except FileNotFoundError:
     st.error("📁 Arquivo 'irrdash3.xlsx' não encontrado. Certifique-se de que o arquivo está no diretório correto.")
 except Exception as e:
     st.error(f"❌ Erro durante a execução: {str(e)}")
-
 
