@@ -85,29 +85,24 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     Retorna:
       - prices (pd.Series): último preço por ticker (sem sufixo .SA)
       - meta (pd.DataFrame): Fonte (intraday/daily) e Timestamp por ticker
-    Tenta 1m intraday (period=1d, interval=1m). Quando não houver valor, cai para daily close (5d).
+    Tenta 1m intraday (period=1d, interval=1m). Se faltar, cai para daily close (5d).
     """
     tickers_sa = [f"{t}.SA" for t in tickers]
 
-    # --- Tentativa 1: intraday 1m (batch)
-    prices = {}
-    source = {}
-    ts_used = {}
+    prices, source, ts_used = {}, {}, {}
 
+    # Intraday 1m (batch)
     try:
-        intraday = yf.download(
-            tickers_sa, period="1d", interval="1m", progress=False
-        )["Close"]
+        intraday = yf.download(tickers_sa, period="1d", interval="1m", progress=False)["Close"]
         if isinstance(intraday, pd.Series):
             intraday = intraday.to_frame()
         intraday = intraday.ffill()
-        # timestamp intradiário mais recente com pelo menos um dado
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
         intraday = pd.DataFrame()
         ts1m = None
 
-    # --- Fallback diário (batch)
+    # Fallback diário (batch)
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
@@ -116,35 +111,60 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         tsd = None
 
     for t, tsa in zip(tickers, tickers_sa):
-        val = np.nan
-        used_ts = None
-        used_src = None
+        val, used_ts, used_src = np.nan, None, None
 
         # tenta intraday
         if ts1m is not None and tsa in getattr(intraday, "columns", []):
             v = intraday.loc[ts1m, tsa]
             if pd.notna(v):
-                val = float(v)
-                used_ts = ts1m
-                used_src = "intraday 1m"
+                val = float(v); used_ts = ts1m; used_src = "intraday 1m"
 
         # fallback diário
         if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
-                val = float(v)
-                used_ts = tsd
-                used_src = "daily close"
+                val = float(v); used_ts = tsd; used_src = "daily close"
 
         prices[t] = val
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
 
     price_series = pd.Series(prices, name="preco")
-    meta = pd.DataFrame(
-        {"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)}
-    )
+    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
+
+
+def build_price_table_html(df: pd.DataFrame) -> str:
+    """Gera uma tabela HTML dark, combinando com o tema do app."""
+    def row_html(r):
+        fonte = r.get("Fonte", "") or ""
+        badge_class = "badge-live" if "intraday" in fonte else "badge-daily"
+        preco = "" if pd.isna(r["Preço"]) else f"{r['Preço']:.2f}"
+        ts = r.get("Timestamp", "") or ""
+        return f"""
+        <tr>
+          <td>{r['Ticker']}</td>
+          <td class="num">{preco}</td>
+          <td><span class="badge {badge_class}">{fonte}</span></td>
+          <td>{ts}</td>
+        </tr>"""
+
+    rows = "\n".join(df.apply(row_html, axis=1).tolist())
+
+    return f"""
+<div class="table-wrap">
+  <div class="table-title">🕒 Preços usados (Yahoo Finance)</div>
+  <table class="styled-table">
+    <thead>
+      <tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th></tr>
+    </thead>
+    <tbody>
+      {rows}
+    </tbody>
+  </table>
+  <div class="table-note">intraday 1m pode ter atraso de ~15 min • “daily close” = último fechamento.</div>
+</div>
+"""
 
 
 def main():
@@ -180,21 +200,16 @@ def main():
   --stk-note-bg:rgba(255,209,84,.06);
   --stk-note-bd:rgba(255,209,84,.25);
   --stk-note-fg:#FFD14F;
+  --panel:#0f3a58;          /* blocos/boxes */
 }
 
-html, body, [class^="css"] {
-  font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
-}
+html, body, [class^="css"] { font-family:"STK Text", Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif; }
 
 /* ===== Pinte todo o topo/toolbar/decoração ===== */
-html, body,
-.stApp,
-[data-testid="stAppViewContainer"],
-[data-testid="stDecoration"],
-header[data-testid="stHeader"],
-header[data-testid="stHeader"] * ,
-[data-testid="stToolbar"],
-[data-testid="stToolbar"] * {
+html, body, .stApp,
+[data-testid="stAppViewContainer"], [data-testid="stDecoration"],
+header[data-testid="stHeader"], header[data-testid="stHeader"] *,
+[data-testid="stToolbar"], [data-testid="stToolbar"] * {
   background:var(--stk-bg) !important;
 }
 header[data-testid="stHeader"] { box-shadow:none !important; }
@@ -202,9 +217,8 @@ header[data-testid="stHeader"] { box-shadow:none !important; }
 /* ===== Container: ocupar a largura toda ===== */
 .block-container{
   padding-top:.75rem; padding-bottom:.75rem;
-  max-width: none !important;   /* remove limite padrão */
-  padding-left: 1.25rem;        /* respiro lateral */
-  padding-right: 1.25rem;
+  max-width: none !important;
+  padding-left: 1.25rem; padding-right: 1.25rem;
 }
 
 /* Cabeçalho chapado */
@@ -219,7 +233,7 @@ header[data-testid="stHeader"] { box-shadow:none !important; }
   font-weight:800; letter-spacing:.4px; color:#fff; margin:0;
 }
 
-/* Nota de rodapé — largura total e visual consistente */
+/* Nota de rodapé */
 .footer-note{
   background:var(--stk-note-bg); border:1px solid var(--stk-note-bd);
   border-radius:10px; padding:16px 18px; color:var(--stk-note-fg);
@@ -227,7 +241,35 @@ header[data-testid="stHeader"] { box-shadow:none !important; }
   width: 100%;
 }
 
-/* Garantir tipografia também no SVG dos gráficos */
+/* ===== Tabela dark custom ===== */
+.table-wrap{ margin: 14px 0 8px; }
+.table-title{ color:#cfe8ff; font-weight:700; margin: 0 0 8px; font-size:1.1rem; }
+.styled-table{
+  width:100%; border-collapse:separate; border-spacing:0;
+  background: rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08);
+  border-radius:12px; overflow:hidden;
+}
+.styled-table thead th{
+  background: rgba(255,255,255,.06);
+  color:#fff; text-align:left; padding:12px 14px; font-weight:600;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
+.styled-table tbody td{
+  color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);
+}
+.styled-table tbody tr:nth-child(even){ background: rgba(255,255,255,.02); }
+.styled-table tbody tr:last-child td{ border-bottom:none; }
+.styled-table td.num{ text-align:right; font-variant-numeric: tabular-nums; }
+.badge{
+  display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem;
+  border:1px solid transparent;
+}
+.badge-live{ background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25); }
+.badge-daily{ background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25); }
+.table-note{ color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px; }
+
+/* Tipografia também no SVG */
 svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 </style>
 """,
@@ -240,67 +282,46 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
     try:
         # ===== Universo de tickers =====
         tickers_for_prices = [
-            # Consolidações por classes
-            "CPLE3", "CPLE6",      # Copel
-            "IGTI3", "IGTI4",      # Iguatemi
-            "ENGI3", "ENGI4",      # Energisa
-            # Demais nomes individuais
-            "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3", "MULT3", "ALOS3",
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
         ]
 
         # ===== PREÇOS: intraday 1m + fallback =====
-        intraday_prices, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
-
-        # tira qualquer .SA do índice (já veio limpo)
-        prices = intraday_prices.astype(float)
+        prices_series, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
+        prices = prices_series.astype(float)
 
         # ===== Quantidade de ações por classe =====
         shares_classes = {
-            # Copel
-            "CPLE3": 1_300_347_300,
-            "CPLE6": 1_679_335_290,
-            # Iguatemi
-            "IGTI3": 770_992_429,
-            "IGTI4": 435_368_756,
-            # Energisa
-            "ENGI3": 887_231_247,
-            "ENGI4": 1_402_193_416,
-            # Demais (1 classe)
-            "EQTL3": 1_255_510_000,
-            "SBSP3": 683_510_000,
-            "NEOE3": 1_213_800_000,
-            "ENEV3": 1_936_970_000,
-            "ELET3": 2_308_630_000,
-            "EGIE3": 815_928_000,
-            "MULT3": 513_164_000,
-            "ALOS3": 542_937_000,
+            "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
+            "IGTI3": 770_992_429, "IGTI4": 435_368_756,
+            "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
+            "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
+            "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
+            "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
+            "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
-
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
         # ===== Consolidações de market cap =====
-        if {"CPLE3", "CPLE6"}.issubset(mc_raw.index):
+        if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
             raise ValueError("Preços de CPLE3/CPLE6 não encontrados.")
-
-        if {"IGTI3", "IGTI4"}.issubset(mc_raw.index):
+        if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
-
-        if {"ENGI3", "ENGI4"}.issubset(mc_raw.index):
+        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
             engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
         else:
             raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
 
-        # ===== Tabela final com tickers-alvo =====
+        # ===== Tabela final de tickers-alvo =====
         final_tickers = [
-            "CPLE6", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-            "MULT3", "ALOS3", "IGTI11", "ENGI11",
+            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
+            "MULT3","ALOS3","IGTI11","ENGI11",
         ]
-
         rows = []
         for t in final_tickers:
             if t == "CPLE6":
@@ -308,7 +329,7 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 shares = shares_classes["CPLE3"] + shares_classes["CPLE6"]
                 mc = cple_total
             elif t == "IGTI11":
-                price = np.nan  # não usamos preço direto do Yahoo
+                price = np.nan
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
@@ -319,39 +340,10 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
                 price = prices.get(t, np.nan)
                 shares = shares_classes.get(t, np.nan)
                 mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
-
             rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
 
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
-
-        # ===== TABELA: preços usados por ativo =====
-        # pegamos apenas os tickers realmente usados (inclusive os de consolidação)
-        price_table_order = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
-            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"
-        ]
-        table = pd.DataFrame({
-            "Preço": prices.reindex(price_table_order),
-        })
-        table["Fonte"] = meta["Fonte"].reindex(price_table_order)
-        # timestamps formatados (se houver tz, exibe local)
-        def fmt_ts(ts):
-            if pd.isna(ts):
-                return ""
-            try:
-                return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
-            except Exception:
-                return str(ts)
-        table["Timestamp"] = meta["Timestamp"].reindex(price_table_order).map(fmt_ts)
-        table = table.rename_axis("Ticker").reset_index()
-
-        st.subheader("🕒 Preços usados (Yahoo Finance)")
-        st.dataframe(
-            table.style.format({"Preço": "{:,.2f}"}),
-            use_container_width=True,
-            hide_index=True
-        )
 
         # ===== Carrega Excel com fluxos de caixa =====
         try:
@@ -364,128 +356,103 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
         df.columns = df.iloc[0]
         df = df.iloc[1:]
 
-        # Garante colunas para todos os tickers de 'resultado'
+        # Garante colunas para todos os tickers-alvo
         for t in resultado.index:
             if t not in df.columns:
                 df[t] = pd.NA
 
-        # Escreve market caps (negativos) na primeira linha de dados
+        # Injeta market caps (negativos) na primeira linha de dados
         target_row = df.index[0]
         today = datetime.now().date()
-        for ticker in resultado.index:
-            mc_val = resultado.loc[ticker, "market_cap"]
-            df.loc[target_row, ticker] = -abs(mc_val)
+        for t in resultado.index:
+            df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
 
-        # Converte colunas para numérico
+        # Converte para numérico
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
 
-        # ===== XIRR por ticker (sem zeragem em 2025-12-31) =====
+        # ===== XIRR por ticker =====
         irr_results = {}
         for t in resultado.index:
             series_cf = df[t].dropna()
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
-
             cashflows = series_cf.values.astype(float).copy()
             n_periods = len(cashflows)
-
-            # Datas: hoje (market cap) + 31/12 de cada ano subsequente
-            dates_list = [today]
-            for j in range(1, n_periods):
-                future_dt = date(today.year + j - 1, 12, 31)
-                dates_list.append(future_dt)
-
+            dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
             irr_results[t] = compute_xirr(cashflows, dates_list)
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
-        ytm_df["irr_aj"] = ytm_df["irr"]  # inicial
+        ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste de IRR real SOMENTE para MULT3, ALOS3 e IGTI11 (deflator 4,5% a.a.)
-        for ticker_adj in ["MULT3", "ALOS3", "IGTI11"]:
-            if ticker_adj in ytm_df.index and not pd.isna(ytm_df.loc[ticker_adj, "irr"]):
-                ytm_df.loc[ticker_adj, "irr_aj"] = ((1 + ytm_df.loc[ticker_adj, "irr"]) / (1 + 0.045)) - 1
+        # Deflator real para alguns tickers
+        for t in ["MULT3","ALOS3","IGTI11"]:
+            if t in ytm_df.index and not pd.isna(ytm_df.loc[t,"irr"]):
+                ytm_df.loc[t,"irr_aj"] = ((1 + ytm_df.loc[t,"irr"]) / (1 + 0.045)) - 1
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ===== Gráfico (largura total, eixo Y iniciando em 4) =====
+        # ===== Gráfico =====
         if len(ytm_clean) > 0:
-            # Paleta suave
             soft_palette = [
-                "#9AA7B2", "#AEB8C2", "#C7B79A", "#A7C5A4", "#BFD7B5",
-                "#BBD0E6", "#D4DBF0", "#E2DBC5", "#E8E1CF", "#D3D9E6",
+                "#9AA7B2","#AEB8C2","#C7B79A","#A7C5A4","#BFD7B5",
+                "#BBD0E6","#D4DBF0","#E2DBC5","#E8E1CF","#D3D9E6",
             ]
-
             plot_data = pd.DataFrame({
                 "empresa": ytm_clean.index,
                 "irr": (ytm_clean["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
-            bar_colors = soft_palette[: len(plot_data)]
+            fig_irr = go.Figure(go.Bar(
+                x=plot_data["empresa"],
+                y=plot_data["irr"],
+                text=[f"{v:.2f}%" for v in plot_data["irr"]],
+                marker=dict(color=soft_palette[:len(plot_data)], line=dict(width=0)),
+                hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
+            ))
+            fig_irr.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
 
-            fig_irr = go.Figure(
-                go.Bar(
-                    x=plot_data["empresa"],
-                    y=plot_data["irr"],
-                    text=[f"{v:.2f}%" for v in plot_data["irr"]],
-                    marker=dict(color=bar_colors, line=dict(width=0)),
-                    hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
-                )
-            )
-
-            fig_irr.update_traces(
-                textposition="outside",
-                cliponaxis=False,
-                textfont=dict(color="white", size=14),
-            )
-
-            # Escala: de 4 até ~10% acima do máximo (mínimo teto 12)
             ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
             ymin = 4.0
-
             fig_irr.update_layout(
-                bargap=0.12,
-                plot_bgcolor="#0e314a",
-                paper_bgcolor="#0e314a",
+                bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
                 uniformtext_minsize=10,
-                font=dict(
-                    family="STK Text, Inter, system-ui, sans-serif",
-                    color="white",
-                    size=14,
-                ),
-                xaxis=dict(
-                    title="Empresas",
-                    tickfont=dict(size=12, color="white"),
-                    showgrid=False,
-                    showline=False,
-                    zeroline=False,
-                ),
-                yaxis=dict(
-                    title="IRR Real (%)",
-                    range=[ymin, ymax],
-                    dtick=1,
-                    gridcolor="rgba(255,255,255,.12)",
-                    zeroline=False,
-                    tickfont=dict(color="white"),
-                ),
-                margin=dict(l=10, r=10, t=6, b=62),
-                showlegend=False,
-                height=560,
+                font=dict(family="STK Text, Inter, system-ui, sans-serif", color="white", size=14),
+                xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"), showgrid=False, showline=False, zeroline=False),
+                yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1, gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
+                margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
             )
-
             st.plotly_chart(fig_irr, use_container_width=True)
+        else:
+            st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
+            return
 
-            st.markdown(
-                """
+        # ===== TABELA (DEPOIS DO GRÁFICO), dark custom =====
+        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
+        tbl = pd.DataFrame({"Preço": prices.reindex(order)})
+        tbl["Fonte"] = meta["Fonte"].reindex(order)
+
+        def fmt_ts(ts):
+            if pd.isna(ts): return ""
+            try: return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
+            except Exception: return str(ts)
+        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(fmt_ts)
+        tbl = tbl.rename_axis("Ticker").reset_index()
+
+        html_table = build_price_table_html(tbl)
+        st.markdown(html_table, unsafe_allow_html=True)
+
+        # ===== Nota de refresh =====
+        st.markdown(
+            """
 <div class="footer-note">
   💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página
 </div>
 """,
-                unsafe_allow_html=True,
-            )
-        else:
-            st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
+            unsafe_allow_html=True,
+        )
 
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
@@ -493,5 +460,6 @@ svg text{ font-family:"STK Text", Inter, system-ui, sans-serif !important; }
 
 if __name__ == "__main__":
     main()
+
 
 
