@@ -130,9 +130,6 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     """
     Lê a aba 'duration' mesmo quando não há cabeçalho padrão.
-    1) Detecta a linha que contém 'Duration'
-    2) Usa a coluna 'Duration' como valores
-    3) Escolhe, por conteúdo, a coluna com os tickers
     Retorna: Series indexado por Ticker (str) com valores de Duration (float).
     """
     try:
@@ -149,7 +146,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if header_row is None:
         return pd.Series(dtype="float64")
 
-    # 2) identifica o índice da coluna 'Duration'
+    # 2) índice da coluna 'Duration'
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
@@ -162,7 +159,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     # 3) dados abaixo do cabeçalho
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
-    # 4) escolhe a coluna de tickers pelo conteúdo (padrão AAAAA9)
+    # 4) escolhe a coluna de tickers (padrão AAAAA9)
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx:
@@ -271,7 +268,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
 
-/* ===== Header ===== */
+/* Header */
 .app-header{
   background:var(--stk-gold); padding:18px 20px; border-radius:12px;
   margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
@@ -305,13 +302,11 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .badge-live{background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25);}
 .badge-daily{background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25);}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
-
-/* Tipografia no SVG */
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # ====== Header ======
+    # Header
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
@@ -368,7 +363,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
 
-        # Tabela final de tickers-alvo (para XIRR)
+        # ====== Tabela final (para XIRR)
         final_tickers = [
             "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","IGTI11","ENGI11",
@@ -472,37 +467,34 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Replica proxies: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (somente se faltar)
+        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
-
         if "IGTI11" in duration_map.index:
-            val = duration_map.loc["IGTI11"]
-            set_if_missing("IGTI3", val)
-            set_if_missing("IGTI4", val)
-
+            v = duration_map.loc["IGTI11"]
+            set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
         if "ENGI11" in duration_map.index:
-            val = duration_map.loc["ENGI11"]
-            set_if_missing("ENGI3", val)
-            set_if_missing("ENGI4", val)
+            v = duration_map.loc["ENGI11"]
+            set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços (depois do gráfico) + Duration ======
+        # ====== Tabela de preços + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
-
-        # Timestamp em horário de Brasília
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
 
-        # adiciona Duration mapeando por Ticker (se não tiver, fica vazio)
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
+        # >>> ORDEM: maior Duration -> menor (NaN por último)
+        tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
+        tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
+
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
-        # ====== Nota ======
+        # Nota
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
@@ -514,6 +506,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
