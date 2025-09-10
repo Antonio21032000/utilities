@@ -5,6 +5,7 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date
 import base64, os
+import re
 
 # ---------- Finance helpers ----------
 try:
@@ -126,47 +127,67 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     return price_series, meta
 
 
-# ---------- Duration loader (aba 'duration') ----------
+# ---------- Duration loader robusto (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     """
-    Lê a aba 'duration' e retorna um Series indexado por Ticker com o valor de Duration.
-    Tenta ser tolerante a nomes de colunas (Ticker/Ativo/Código; Duration/Duração).
+    Lê a aba 'duration' mesmo quando não há cabeçalho padrão.
+    1) Detecta a linha que contém 'Duration'
+    2) Usa a coluna 'Duration' como valores
+    3) Escolhe, por conteúdo, a coluna com os tickers
+    Retorna: Series indexado por Ticker (str) com valores de Duration (float).
     """
     try:
-        df = pd.read_excel(excel_path, sheet_name=sheet)
-    except FileNotFoundError:
-        return pd.Series(dtype="object")
+        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
     except Exception:
-        return pd.Series(dtype="object")
+        return pd.Series(dtype="float64")
 
-    # Normaliza nomes
-    df.columns = [str(c).strip() for c in df.columns]
-
-    # Descobre coluna de ticker
-    ticker_col = None
-    for c in df.columns:
-        if c.lower() in ("ticker", "tickers", "ativo", "symbol", "símbolo", "codigo", "código", "code"):
-            ticker_col = c
+    # 1) acha a linha do "Duration"
+    header_row = None
+    for i, row in raw.iterrows():
+        if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
+            header_row = i
             break
-    if ticker_col is None:
-        ticker_col = df.columns[0]
+    if header_row is None:
+        return pd.Series(dtype="float64")
 
-    # Descobre coluna de duration
-    dur_col = None
-    for c in df.columns:
-        if c.lower() in ("duration", "duracao", "duração", "dur"):
-            dur_col = c
+    # 2) identifica o índice da coluna 'Duration'
+    header_vals = raw.iloc[header_row].tolist()
+    dur_idx = None
+    for j, v in enumerate(header_vals):
+        if isinstance(v, str) and "duration" in v.strip().lower():
+            dur_idx = j
             break
-    if dur_col is None:
-        # pega a 1ª coluna numérica que não seja o ticker
-        candidates = [c for c in df.columns if c != ticker_col]
-        num_cols = [c for c in candidates if pd.api.types.is_numeric_dtype(df[c])]
-        dur_col = num_cols[0] if num_cols else candidates[0]
+    if dur_idx is None:
+        return pd.Series(dtype="float64")
 
-    out = df[[ticker_col, dur_col]].dropna()
-    out[ticker_col] = out[ticker_col].astype(str).str.strip().str.upper()
+    # 3) dados abaixo do cabeçalho
+    df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
-    return out.set_index(ticker_col)[dur_col]
+    # 4) escolhe a coluna de tickers pelo conteúdo (padrão AAAAA9)
+    ticker_idx, best_score = None, -1
+    for j in range(df.shape[1]):
+        if j == dur_idx:
+            continue
+        s = df.iloc[:, j].dropna()
+        cnt = 0
+        for x in s:
+            if isinstance(x, str):
+                token = x.strip().upper()
+                if re.fullmatch(r"[A-Z]{3,5}\d{0,2}", token):
+                    cnt += 1
+        if cnt > best_score:
+            best_score, ticker_idx = cnt, j
+    if ticker_idx is None:
+        return pd.Series(dtype="float64")
+
+    tickers = df.iloc[:, ticker_idx].astype(str).str.strip().str.upper()
+    durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
+
+    out = pd.Series(durations.values, index=tickers.values)
+    # limpa entradas vazias
+    out = out[~out.index.isin(["", "NAN", "NONE"])]
+    out = out.dropna()
+    return out
 
 
 # ---------- Pretty HTML table ----------
@@ -181,14 +202,15 @@ def build_price_table_html(df: pd.DataFrame) -> str:
 
         preco = "" if pd.isna(r["Preço"]) else f"{r['Preço']:.2f}"
         ts = r.get("Timestamp") or ""
-        dur = r.get("Duration", "")
 
-        # formata duration se for numérica
-        if pd.api.types.is_number(r.get("Duration")):
+        dur_val = r.get("Duration", "")
+        if pd.isna(dur_val) or dur_val == "":
+            dur = ""
+        else:
             try:
-                dur = f"{float(r['Duration']):.2f}"
+                dur = f"{float(dur_val):.2f}"
             except Exception:
-                pass
+                dur = str(dur_val)
 
         rows_html.append(
             "<tr>"
@@ -196,7 +218,7 @@ def build_price_table_html(df: pd.DataFrame) -> str:
             f"<td class='num'>{preco}</td>"
             f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
             f"<td>{ts}</td>"
-            f"<td class='num'>{'' if pd.isna(r.get('Duration')) else dur}</td>"
+            f"<td class='num'>{dur}</td>"
             "</tr>"
         )
     return (
@@ -241,7 +263,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 }
 .header-inner{
   position:relative; height:48px;
-  display:flex; align-items:center; justify-content:center;  /* centraliza o título */
+  display:flex; align-items:center; justify-content:center;
 }
 .stk-logo{
   position:absolute; left:16px; top:50%; transform:translateY(-50%);
@@ -331,7 +353,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
 
-        # Tabela final de tickers-alvo
+        # Tabela final de tickers-alvo (para XIRR)
         final_tickers = [
             "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","IGTI11","ENGI11",
@@ -447,9 +469,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             except Exception: return str(ts)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(fmt_ts)
 
-        # adiciona Duration mapeando por Ticker
+        # adiciona Duration mapeando por Ticker (se não tiver, fica vazio)
         tbl = tbl.rename_axis("Ticker").reset_index()
-        tbl["Duration"] = tbl["Ticker"].map(duration_map).astype("object")
+        if not duration_map.empty:
+            tbl["Duration"] = tbl["Ticker"].map(duration_map)
+        else:
+            tbl["Duration"] = ""
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
@@ -465,6 +490,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
