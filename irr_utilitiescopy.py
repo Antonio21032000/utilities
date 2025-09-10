@@ -126,27 +126,84 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     return price_series, meta
 
 
+# ---------- Duration loader (aba 'duration') ----------
+def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
+    """
+    Lê a aba 'duration' e retorna um Series indexado por Ticker com o valor de Duration.
+    Tenta ser tolerante a nomes de colunas (Ticker/Ativo/Código; Duration/Duração).
+    """
+    try:
+        df = pd.read_excel(excel_path, sheet_name=sheet)
+    except FileNotFoundError:
+        return pd.Series(dtype="object")
+    except Exception:
+        return pd.Series(dtype="object")
+
+    # Normaliza nomes
+    df.columns = [str(c).strip() for c in df.columns]
+
+    # Descobre coluna de ticker
+    ticker_col = None
+    for c in df.columns:
+        if c.lower() in ("ticker", "tickers", "ativo", "symbol", "símbolo", "codigo", "código", "code"):
+            ticker_col = c
+            break
+    if ticker_col is None:
+        ticker_col = df.columns[0]
+
+    # Descobre coluna de duration
+    dur_col = None
+    for c in df.columns:
+        if c.lower() in ("duration", "duracao", "duração", "dur"):
+            dur_col = c
+            break
+    if dur_col is None:
+        # pega a 1ª coluna numérica que não seja o ticker
+        candidates = [c for c in df.columns if c != ticker_col]
+        num_cols = [c for c in candidates if pd.api.types.is_numeric_dtype(df[c])]
+        dur_col = num_cols[0] if num_cols else candidates[0]
+
+    out = df[[ticker_col, dur_col]].dropna()
+    out[ticker_col] = out[ticker_col].astype(str).str.strip().str.upper()
+
+    return out.set_index(ticker_col)[dur_col]
+
+
 # ---------- Pretty HTML table ----------
 def build_price_table_html(df: pd.DataFrame) -> str:
+    """
+    Espera colunas: Ticker, Preço, Fonte, Timestamp, Duration (opcional)
+    """
     rows_html = []
     for _, r in df.iterrows():
         fonte = (r.get("Fonte") or "")
-        badge_class = "badge-live" if "intraday" in fonte else "badge-daily"
+        badge_class = "badge-live" if "intraday" in str(fonte) else "badge-daily"
+
         preco = "" if pd.isna(r["Preço"]) else f"{r['Preço']:.2f}"
         ts = r.get("Timestamp") or ""
+        dur = r.get("Duration", "")
+
+        # formata duration se for numérica
+        if pd.api.types.is_number(r.get("Duration")):
+            try:
+                dur = f"{float(r['Duration']):.2f}"
+            except Exception:
+                pass
+
         rows_html.append(
             "<tr>"
             f"<td>{r['Ticker']}</td>"
             f"<td class='num'>{preco}</td>"
             f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
             f"<td>{ts}</td>"
+            f"<td class='num'>{'' if pd.isna(r.get('Duration')) else dur}</td>"
             "</tr>"
         )
     return (
         "<div class='table-wrap'>"
         "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
         "<table class='styled-table'>"
-        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th></tr></thead>"
+        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
         "<tbody>" + "".join(rows_html) + "</tbody></table>"
         "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • “daily close” = último fechamento.</div>"
         "</div>"
@@ -375,7 +432,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        # ====== Tabela de preços (depois do gráfico) ======
+        # ====== Duration (aba 'duration') ======
+        duration_map = load_duration_map("irrdash3.xlsx", "duration")
+
+        # ====== Tabela de preços (depois do gráfico) + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -386,7 +446,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             try: return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
             except Exception: return str(ts)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(fmt_ts)
+
+        # adiciona Duration mapeando por Ticker
         tbl = tbl.rename_axis("Ticker").reset_index()
+        tbl["Duration"] = tbl["Ticker"].map(duration_map).astype("object")
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
@@ -402,6 +465,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
