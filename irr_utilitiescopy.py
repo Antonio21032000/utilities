@@ -4,8 +4,7 @@ import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date
-import base64, os
-import re
+import base64, os, re
 
 # ---------- Finance helpers ----------
 try:
@@ -184,10 +183,26 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
 
     out = pd.Series(durations.values, index=tickers.values)
-    # limpa entradas vazias
     out = out[~out.index.isin(["", "NAN", "NONE"])]
     out = out.dropna()
     return out
+
+
+# ---------- Helpers de formatação ----------
+def format_ts_brt(ts) -> str:
+    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
+    if ts is None or (isinstance(ts, float) and pd.isna(ts)):
+        return ""
+    t = pd.to_datetime(ts, errors="coerce")
+    if pd.isna(t):
+        return ""
+    try:
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")  # yfinance costuma vir em UTC
+        t = t.tz_convert("America/Sao_Paulo")
+    except Exception:
+        pass
+    return t.strftime("%Y-%m-%d %H:%M")
 
 
 # ---------- Pretty HTML table ----------
@@ -227,7 +242,7 @@ def build_price_table_html(df: pd.DataFrame) -> str:
         "<table class='styled-table'>"
         "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
         "<tbody>" + "".join(rows_html) + "</tbody></table>"
-        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • “daily close” = último fechamento.</div>"
+        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
         "</div>"
     )
 
@@ -256,7 +271,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
 
-/* ===== Header: logo à esquerda e título centralizado ===== */
+/* ===== Header ===== */
 .app-header{
   background:var(--stk-gold); padding:18px 20px; border-radius:12px;
   margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
@@ -296,7 +311,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # ====== Header com logo (esquerda) e título (centro) ======
+    # ====== Header ======
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
@@ -455,7 +470,22 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         st.plotly_chart(fig, use_container_width=True)
 
         # ====== Duration (aba 'duration') ======
-        duration_map = load_duration_map("irrdash3.xlsx", "duration")
+        duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
+
+        # Replica proxies: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (somente se faltar)
+        def set_if_missing(label, value):
+            if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
+                duration_map.loc[label] = value
+
+        if "IGTI11" in duration_map.index:
+            val = duration_map.loc["IGTI11"]
+            set_if_missing("IGTI3", val)
+            set_if_missing("IGTI4", val)
+
+        if "ENGI11" in duration_map.index:
+            val = duration_map.loc["ENGI11"]
+            set_if_missing("ENGI3", val)
+            set_if_missing("ENGI4", val)
 
         # ====== Tabela de preços (depois do gráfico) + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
@@ -463,18 +493,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
 
-        def fmt_ts(ts):
-            if pd.isna(ts): return ""
-            try: return pd.to_datetime(ts).strftime("%Y-%m-%d %H:%M")
-            except Exception: return str(ts)
-        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(fmt_ts)
+        # Timestamp em horário de Brasília
+        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
 
         # adiciona Duration mapeando por Ticker (se não tiver, fica vazio)
         tbl = tbl.rename_axis("Ticker").reset_index()
-        if not duration_map.empty:
-            tbl["Duration"] = tbl["Ticker"].map(duration_map)
-        else:
-            tbl["Duration"] = ""
+        tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
@@ -490,8 +514,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
-
 
 
 
