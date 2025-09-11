@@ -12,6 +12,26 @@ try:
 except Exception:
     npf = None
 
+# --- Helpers seguros contra NA/NaT ---
+def _isna(x):
+    try:
+        return pd.isna(x)
+    except Exception:
+        return x is None
+
+def sblank(x: object) -> str:
+    """String vazia se NA/NaT/None; caso contrário str(x)."""
+    return "" if _isna(x) else str(x)
+
+def sfloat(x: object, nd: int = 2) -> str:
+    """Formata float com nd casas; vazio se NA/NaT; senão devolve str(x)."""
+    if _isna(x):
+        return ""
+    try:
+        return f"{float(x):.{nd}f}"
+    except Exception:
+        return sblank(x)
+
 
 def compute_irr(cashflows: np.ndarray) -> float:
     values = np.asarray(cashflows, dtype=float)
@@ -188,45 +208,38 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
     """Converte qualquer timestamp para America/Sao_Paulo e formata."""
-    if ts is None or (isinstance(ts, float) and pd.isna(ts)):
-        return ""
     t = pd.to_datetime(ts, errors="coerce")
-    if pd.isna(t):
+    if _isna(t):
         return ""
     try:
+        # yfinance costuma vir em UTC
         if t.tzinfo is None:
-            t = t.tz_localize("UTC")  # yfinance costuma vir em UTC
+            t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
     except Exception:
+        # Se algo falhar (já tem tz incorreta, etc.), apenas formata
         pass
     return t.strftime("%Y-%m-%d %H:%M")
 
 
-# ---------- Pretty HTML table ----------
+# ---------- Pretty HTML table (sem truthiness de NA/NaT) ----------
 def build_price_table_html(df: pd.DataFrame) -> str:
     """
     Espera colunas: Ticker, Preço, Fonte, Timestamp, Duration (opcional)
     """
     rows_html = []
     for _, r in df.iterrows():
-        fonte = (r.get("Fonte") or "")
-        badge_class = "badge-live" if "intraday" in str(fonte) else "badge-daily"
+        fonte = sblank(r.get("Fonte"))
+        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
 
-        preco = "" if pd.isna(r["Preço"]) else f"{r['Preço']:.2f}"
-        ts = r.get("Timestamp") or ""
+        preco = sfloat(r.get("Preço"))
+        ts = sblank(r.get("Timestamp"))  # já vem formatado em BRT
 
-        dur_val = r.get("Duration", "")
-        if pd.isna(dur_val) or dur_val == "":
-            dur = ""
-        else:
-            try:
-                dur = f"{float(dur_val):.2f}"
-            except Exception:
-                dur = str(dur_val)
+        dur = sfloat(r.get("Duration"))
 
         rows_html.append(
             "<tr>"
-            f"<td>{r['Ticker']}</td>"
+            f"<td>{sblank(r.get('Ticker'))}</td>"
             f"<td class='num'>{preco}</td>"
             f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
             f"<td>{ts}</td>"
@@ -478,7 +491,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             v = duration_map.loc["ENGI11"]
             set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration ======
+        # ====== Tabela de preços + Duration (ordenada por Duration) ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -488,7 +501,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        # >>> ORDEM: maior Duration -> menor (NaN por último)
+        # Ordena por Duration (numérica) desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
