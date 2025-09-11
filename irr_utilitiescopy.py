@@ -20,11 +20,9 @@ def _isna(x):
         return x is None
 
 def sblank(x: object) -> str:
-    """String vazia se NA/NaT/None; caso contrário str(x)."""
     return "" if _isna(x) else str(x)
 
 def sfloat(x: object, nd: int = 2) -> str:
-    """Formata float com nd casas; vazio se NA/NaT; senão devolve str(x)."""
     if _isna(x):
         return ""
     try:
@@ -96,12 +94,6 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
-    """
-    Retorna:
-      - prices: pd.Series (preço por ticker, sem .SA)
-      - meta:   pd.DataFrame(Fonte, Timestamp) por ticker
-    Tenta intraday 1m; se faltar, usa daily close.
-    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
@@ -148,16 +140,11 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
 
 # ---------- Duration loader robusto (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
-    """
-    Lê a aba 'duration' mesmo quando não há cabeçalho padrão.
-    Retorna: Series indexado por Ticker (str) com valores de Duration (float).
-    """
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
     except Exception:
         return pd.Series(dtype="float64")
 
-    # 1) acha a linha do "Duration"
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
@@ -166,7 +153,6 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if header_row is None:
         return pd.Series(dtype="float64")
 
-    # 2) índice da coluna 'Duration'
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
@@ -176,10 +162,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
-    # 3) dados abaixo do cabeçalho
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
-    # 4) escolhe a coluna de tickers (padrão AAAAA9)
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx:
@@ -207,34 +191,26 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
-    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
     t = pd.to_datetime(ts, errors="coerce")
     if _isna(t):
         return ""
     try:
-        # yfinance costuma vir em UTC
         if t.tzinfo is None:
             t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
     except Exception:
-        # Se algo falhar (já tem tz incorreta, etc.), apenas formata
         pass
     return t.strftime("%Y-%m-%d %H:%M")
 
 
-# ---------- Pretty HTML table (sem truthiness de NA/NaT) ----------
+# ---------- Pretty HTML table ----------
 def build_price_table_html(df: pd.DataFrame) -> str:
-    """
-    Espera colunas: Ticker, Preço, Fonte, Timestamp, Duration (opcional)
-    """
     rows_html = []
     for _, r in df.iterrows():
         fonte = sblank(r.get("Fonte"))
         badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
-
         preco = sfloat(r.get("Preço"))
-        ts = sblank(r.get("Timestamp"))  # já vem formatado em BRT
-
+        ts = sblank(r.get("Timestamp"))
         dur = sfloat(r.get("Duration"))
 
         rows_html.append(
@@ -449,17 +425,22 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
             return
 
-        colors = ["#9AA7B2","#AEB8C2","#C7B79A","#A7C5A4","#BFD7B5",
-                  "#BBD0E6","#D4DBF0","#E2DBC5","#E8E1CF","#D3D9E6"]
         plot_data = pd.DataFrame({
             "empresa": ytm_clean.index,
             "irr": (ytm_clean["irr_aj"] * 100).round(2),
         }).reset_index(drop=True)
 
+        # >>> CORES PERSONALIZADAS
+        destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
+        cor_ouro = "rgb(201,140,46)"   # #C98C2E
+        cor_azul = "rgb(16,144,178)"   # #1090B2
+        bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
+
         fig = go.Figure(go.Bar(
-            x=plot_data["empresa"], y=plot_data["irr"],
+            x=plot_data["empresa"],
+            y=plot_data["irr"],
             text=[f"{v:.2f}%" for v in plot_data["irr"]],
-            marker=dict(color=colors[:len(plot_data)], line=dict(width=0)),
+            marker=dict(color=bar_colors, line=dict(width=0)),
             hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
         ))
         fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
@@ -480,7 +461,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -501,13 +481,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        # Ordena por Duration (numérica) desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
-        # Nota
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
@@ -519,6 +497,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
