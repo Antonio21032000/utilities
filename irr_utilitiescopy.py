@@ -20,9 +20,11 @@ def _isna(x):
         return x is None
 
 def sblank(x: object) -> str:
+    """String vazia se NA/NaT/None; caso contrário str(x)."""
     return "" if _isna(x) else str(x)
 
 def sfloat(x: object, nd: int = 2) -> str:
+    """Formata float com nd casas; vazio se NA/NaT; senão devolve str(x)."""
     if _isna(x):
         return ""
     try:
@@ -94,6 +96,12 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
+    """
+    Retorna:
+      - prices: pd.Series (preço por ticker, sem .SA)
+      - meta:   pd.DataFrame(Fonte, Timestamp) por ticker
+    Tenta intraday 1m; se faltar, usa daily close.
+    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
@@ -140,11 +148,16 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
 
 # ---------- Duration loader robusto (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
+    """
+    Lê a aba 'duration' mesmo quando não há cabeçalho padrão.
+    Retorna: Series indexado por Ticker (str) com valores de Duration (float).
+    """
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
     except Exception:
         return pd.Series(dtype="float64")
 
+    # 1) acha a linha do "Duration"
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
@@ -153,6 +166,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if header_row is None:
         return pd.Series(dtype="float64")
 
+    # 2) índice da coluna 'Duration'
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
@@ -162,8 +176,10 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
+    # 3) dados abaixo do cabeçalho
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
+    # 4) escolhe a coluna de tickers (padrão AAAAA9)
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx:
@@ -191,26 +207,30 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
+    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
     t = pd.to_datetime(ts, errors="coerce")
     if _isna(t):
         return ""
     try:
         if t.tzinfo is None:
-            t = t.tz_localize("UTC")
+            t = t.tz_localize("UTC")  # yfinance costuma vir em UTC
         t = t.tz_convert("America/Sao_Paulo")
     except Exception:
         pass
     return t.strftime("%Y-%m-%d %H:%M")
 
 
-# ---------- Pretty HTML table ----------
+# ---------- Pretty HTML table (sem truthiness de NA/NaT) ----------
 def build_price_table_html(df: pd.DataFrame) -> str:
+    """
+    Espera colunas: Ticker, Preço, Fonte, Timestamp, Duration (opcional)
+    """
     rows_html = []
     for _, r in df.iterrows():
         fonte = sblank(r.get("Fonte"))
         badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
         preco = sfloat(r.get("Preço"))
-        ts = sblank(r.get("Timestamp"))
+        ts = sblank(r.get("Timestamp"))  # já vem formatado em BRT
         dur = sfloat(r.get("Duration"))
 
         rows_html.append(
@@ -222,6 +242,7 @@ def build_price_table_html(df: pd.DataFrame) -> str:
             f"<td class='num'>{dur}</td>"
             "</tr>"
         )
+
     return (
         "<div class='table-wrap'>"
         "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
@@ -420,47 +441,50 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
+        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
+
         # ====== Gráfico ======
-        if len(ytm_clean) == 0:
-            st.error("⚠️ Não foi possível calcular IRR para nenhuma empresa.")
-            return
+        if len(ytm_plot) == 0:
+            st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros (ELET3/ELET6 removidos).")
+        else:
+            plot_data = pd.DataFrame({
+                "empresa": ytm_plot.index,
+                "irr": (ytm_plot["irr_aj"] * 100).round(2),
+            }).reset_index(drop=True)
 
-        plot_data = pd.DataFrame({
-            "empresa": ytm_clean.index,
-            "irr": (ytm_clean["irr_aj"] * 100).round(2),
-        }).reset_index(drop=True)
+            # Cores personalizadas
+            destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
+            cor_ouro = "rgb(201,140,46)"   # #C98C2E
+            cor_azul = "rgb(16,144,178)"   # #1090B2
+            bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
 
-        # >>> CORES PERSONALIZADAS
-        destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
-        cor_ouro = "rgb(201,140,46)"   # #C98C2E
-        cor_azul = "rgb(16,144,178)"   # #1090B2
-        bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
+            fig = go.Figure(go.Bar(
+                x=plot_data["empresa"],
+                y=plot_data["irr"],
+                text=[f"{v:.2f}%" for v in plot_data["irr"]],
+                marker=dict(color=bar_colors, line=dict(width=0)),
+                hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
+            ))
+            fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
 
-        fig = go.Figure(go.Bar(
-            x=plot_data["empresa"],
-            y=plot_data["irr"],
-            text=[f"{v:.2f}%" for v in plot_data["irr"]],
-            marker=dict(color=bar_colors, line=dict(width=0)),
-            hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
-        ))
-        fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
-
-        ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
-        fig.update_layout(
-            bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
-            uniformtext_minsize=10,
-            font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
-            xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
-                       showgrid=False, showline=False, zeroline=False),
-            yaxis=dict(title="IRR Real (%)", range=[4.0, ymax], dtick=1,
-                       gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
-            margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
-        )
-        st.plotly_chart(fig, use_container_width=True)
+            ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
+            fig.update_layout(
+                bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
+                uniformtext_minsize=10,
+                font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
+                xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
+                           showgrid=False, showline=False, zeroline=False),
+                yaxis=dict(title="IRR Real (%)", range=[4.0, ymax], dtick=1,
+                           gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
+                margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
+        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -481,11 +505,13 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
+        # Ordena por Duration (numérica) desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
+        # Nota
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
