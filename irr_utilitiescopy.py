@@ -111,7 +111,12 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         if isinstance(intraday, pd.Series):
             intraday = intraday.to_frame()
         intraday = intraday.ffill()
-        ts1m = intraday.dropna(how="all").index.max()
+
+        ts1m = None
+        if len(intraday.index):
+            idx_max = intraday.index.max()
+            if not pd.isna(idx_max):
+                ts1m = idx_max
     except Exception:
         intraday = pd.DataFrame()
         ts1m = None
@@ -119,7 +124,12 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     # Daily close (batch)
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
-        tsd = daily.index[-1] if len(daily.index) else None
+
+        tsd = None
+        if len(daily.index):
+            last_idx = daily.index[-1]
+            if not pd.isna(last_idx):
+                tsd = last_idx
     except Exception:
         daily = pd.DataFrame()
         tsd = None
@@ -127,12 +137,15 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
 
-        if ts1m is not None and tsa in getattr(intraday, "columns", []):
-            v = intraday.loc[ts1m, tsa]
+        # Intraday seguro (só se ts1m é válido e existe no índice)
+        if (ts1m is not None) and (not pd.isna(ts1m)) and \
+           (tsa in getattr(intraday, "columns", [])) and (ts1m in getattr(intraday, "index", [])):
+            v = intraday.at[ts1m, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = ts1m; used_src = "intraday 1m"
 
-        if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
+        # Daily seguro
+        if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and (len(daily.index) > 0):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
                 val = float(v); used_ts = tsd; used_src = "daily close"
@@ -441,7 +454,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        # ====== Remover ELET3 e ELET6 do gráfico ======
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -523,6 +536,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
