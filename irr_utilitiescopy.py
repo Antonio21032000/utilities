@@ -267,6 +267,8 @@ def main():
 :root{
   --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
+  --stk-header-bg:#ffffff;           /* Fundo branco no retângulo do topo */
+  --stk-header-fg:#0e314a;           /* Título azul */
 }
 
 html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
@@ -280,8 +282,10 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 /* Header */
 .app-header{
-  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
+  background:var(--stk-header-bg);   /* antes: var(--stk-gold) */
+  padding:18px 20px; border-radius:12px;
+  margin:16px 0 16px;
+  box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);
 }
 .header-inner{
   position:relative; height:48px;
@@ -289,9 +293,12 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 }
 .stk-logo{
   position:absolute; left:16px; top:50%; transform:translateY(-50%);
-  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
+  height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
 }
-.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
+.app-header h1{
+  margin:0; color:var(--stk-header-fg); /* antes: #fff */
+  font-weight:800; letter-spacing:.4px;
+}
 
 /* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
@@ -523,6 +530,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
