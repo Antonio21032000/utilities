@@ -70,7 +70,6 @@ def cap_to_first_digits_mln(value, digits=6):
     total_mln = round(value / 1e6)
     return int(str(int(total_mln))[:digits])
 
-# ---------- Timestamp helper ----------
 def format_ts_brt(ts) -> str:
     t = pd.to_datetime(ts, errors="coerce")
     if _isna(t): return ""
@@ -117,7 +116,7 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
 
-# ---------- Duration loader (aba 'duration') ----------
+# ---------- Duration loader ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
@@ -159,14 +158,14 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Normalização de nomes ----------
 def norm_name(s: str) -> str:
-    # Upper + remove qualquer coisa que não seja A-Z ou 0-9
     return re.sub(r"[^A-Z0-9]", "", str(s).upper())
 
 def build_colmap(df: pd.DataFrame) -> dict:
-    """mapeia nome_normalizado -> nome_real"""
     m = {}
     for c in df.columns:
-        m[norm_name(c)] = c
+        key = norm_name(c)
+        if key not in m:           # mantém a 1ª ocorrência (coluna mais à esquerda)
+            m[key] = c
     return m
 
 # ---------- App ----------
@@ -247,36 +246,38 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
 
-        # Market caps (preço * shares)
+        # Market caps
         mc_raw = prices.reindex(shares_classes.keys()) * pd.Series(shares_classes)
-
-        # Consolidações específicas
         cple_total = mc_raw.get("CPLE3", np.nan) + mc_raw.get("CPLE6", np.nan)
         igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
 
         # ====== Ler Excel Sheet1 ======
         raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # linha 2 = cabeçalho
 
-        # Normaliza nomes de colunas (para achar ENGI11 se vier com espaço/caso)
-        colmap = build_colmap(raw)          # normalizado -> real
-        want = {norm_name(t): t for t in [
-            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"
-        ]}
+        # Mapa de nomes normalizados -> nomes reais
+        def build_colmap(df: pd.DataFrame) -> dict:
+            m = {}
+            for c in df.columns:
+                key = norm_name(c)
+                if key not in m:
+                    m[key] = c
+            return m
+        colmap = build_colmap(raw)
 
-        # Coluna 'Tickers' (anos + Mkt cap)
-        first_col = raw.columns[0]
-        if norm_name(first_col) != "TICKERS":
-            raw = raw.rename(columns={first_col: "Tickers"})
-        # linha Mkt cap
-        mkt_row_mask = raw["Tickers"].astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
+        # 1ª coluna SEMPRE usada como “Tickers” (evita duplicidade de cabeçalho)
+        tick_col_series = raw.iloc[:, 0]
+
+        # linha "Mkt cap"
+        mkt_row_mask = tick_col_series.astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
         if not mkt_row_mask.any():
             raise ValueError("Linha 'Mkt cap' não encontrada na Sheet1.")
+
         # linhas de anos (^\d{4}$)
-        year_rows = raw["Tickers"].astype(str).str.fullmatch(r"\d{4}")
+        year_rows = tick_col_series.astype(str).str.fullmatch(r"\d{4}")
         year_idx = list(raw.index[year_rows])
 
         # ====== Monta tabela alvo (usa fluxos REAIS) ======
-        final_tickers = list(want.values())
+        final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
         rows = []
         for t in final_tickers:
             if t == "CPLE6":
@@ -300,26 +301,20 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== XIRR: [-market_cap_calculado] + fluxos da planilha (coluna encontrada por nome normalizado) ======
+        # ====== XIRR: [-market_cap] + fluxos da planilha ======
         today = datetime.now().date()
         irr_results = {}
         for t in resultado.index:
-            norm_t = norm_name(t)
-            if norm_t not in colmap:
+            key = norm_name(t)
+            if key not in colmap:
                 irr_results[t] = np.nan
                 continue
-            real_col = colmap[norm_t]
+            real_col = colmap[key]
 
-            # cabeça: -market cap calculado (array 1-D)
             head = np.array([-abs(resultado.loc[t, "market_cap"])], dtype=float)
-
-            # fluxos anuais
             flows = pd.to_numeric(raw.loc[year_idx, real_col], errors="coerce").dropna().values.astype(float)
-
-            # série completa
             series = head if flows.size == 0 else np.concatenate([head, flows])
 
-            # datas
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, len(series))]
             irr_results[t] = compute_xirr(series, dates_list)
 
@@ -330,7 +325,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # Remove ELET3/ELET6 do gráfico
+        # Remove ELET3/ELET6
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -374,7 +369,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]; set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços (inclui ENGI11) ======
+        # ====== Tabela de preços ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -385,7 +380,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
-        # HTML table
         def build_price_table_html(df: pd.DataFrame) -> str:
             rows_html = []
             for _, r in df.iterrows():
@@ -421,6 +415,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
