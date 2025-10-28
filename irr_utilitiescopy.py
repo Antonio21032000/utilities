@@ -345,7 +345,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     try:
         # ====== Tickers ======
         tickers_for_prices = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",  # incluí ENGI11 aqui
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
         ]
 
@@ -358,6 +358,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
+            "ENGI11": 2_289_420_000,  # usar diretamente ENGI11
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -366,7 +367,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # Consolidações
+        # Consolidações (mantidas para CPLE e IGTI; ENGI11 usa seu próprio preço e shares)
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
@@ -375,10 +376,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
-        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
-            engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-        else:
-            raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
 
         # ====== Tabela final (para XIRR)
         final_tickers = [
@@ -396,9 +393,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
-                price = np.nan
-                shares = shares_classes["ENGI3"] + shares_classes["ENGI4"]
-                mc = engi_total
+                # ENGI11: usa preço e shares próprios
+                price = prices.get("ENGI11", np.nan)
+                shares = shares_classes["ENGI11"]
+                mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
             else:
                 price = prices.get(t, np.nan)
                 shares = shares_classes.get(t, np.nan)
@@ -502,9 +500,13 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             v = duration_map.loc["ENGI11"]
             set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration (ordenada por Duration) ======
-        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
-                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
+        # ====== Tabela de preços + Duration (agora inclui ENGI11) ======
+        order = [
+            "CPLE3","CPLE6",
+            "IGTI3","IGTI4",
+            "ENGI3","ENGI4","ENGI11",   # <- incluído ENGI11 na tabela
+            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"
+        ]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
@@ -530,6 +532,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
