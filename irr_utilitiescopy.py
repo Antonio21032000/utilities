@@ -70,10 +70,24 @@ def cap_to_first_digits_mln(value, digits=6):
     total_mln = round(value / 1e6)
     return int(str(int(total_mln))[:digits])
 
+# ---------- Timestamp helper ----------
+def format_ts_brt(ts) -> str:
+    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
+    t = pd.to_datetime(ts, errors="coerce")
+    if _isna(t): return ""
+    try:
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")
+        t = t.tz_convert("America/Sao_Paulo")
+    except Exception:
+        pass
+    return t.strftime("%Y-%m-%d %H:%M")
+
 # ---------- Yahoo prices ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
+
     try:
         intraday = yf.download(tickers_sa, period="1d", interval="1m", progress=False)["Close"]
         if isinstance(intraday, pd.Series): intraday = intraday.to_frame()
@@ -81,6 +95,7 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
         intraday, ts1m = pd.DataFrame(), None
+
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
@@ -98,28 +113,37 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         prices[t] = val
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
+
     price_series = pd.Series(prices, name="preco")
     meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
 
-# ---------- Duration loader ----------
+# ---------- Duration loader (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
     except Exception:
         return pd.Series(dtype="float64")
+
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i; break
-    if header_row is None: return pd.Series(dtype="float64")
+            header_row = i
+            break
+    if header_row is None:
+        return pd.Series(dtype="float64")
+
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
         if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j; break
-    if dur_idx is None: return pd.Series(dtype="float64")
+            dur_idx = j
+            break
+    if dur_idx is None:
+        return pd.Series(dtype="float64")
+
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
+
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx: continue
@@ -129,32 +153,67 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
                 token = x.strip().upper()
                 if re.fullmatch(r"[A-Z]{3,5}\d{0,2}", token): cnt += 1
         if cnt > best_score: best_score, ticker_idx = cnt, j
-    if ticker_idx is None: return pd.Series(dtype="float64")
+    if ticker_idx is None:
+        return pd.Series(dtype="float64")
+
     tickers = df.iloc[:, ticker_idx].astype(str).str.strip().str.upper()
     durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
+
     out = pd.Series(durations.values, index=tickers.values)
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
 
-# ---------- Excel helpers ----------
+# ---------- HTML da tabela ----------
+def build_price_table_html(df: pd.DataFrame) -> str:
+    rows_html = []
+    for _, r in df.iterrows():
+        fonte = sblank(r.get("Fonte"))
+        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
+        preco = sfloat(r.get("Preço"))
+        ts = sblank(r.get("Timestamp"))
+        dur = sfloat(r.get("Duration"))
+        rows_html.append(
+            "<tr>"
+            f"<td>{sblank(r.get('Ticker'))}</td>"
+            f"<td class='num'>{preco}</td>"
+            f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
+            f"<td>{ts}</td>"
+            f"<td class='num'>{dur}</td>"
+            "</tr>"
+        )
+    return (
+        "<div class='table-wrap'>"
+        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
+        "<table class='styled-table'>"
+        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
+        "<tbody>" + "".join(rows_html) + "</tbody></table>"
+        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
+        "</div>"
+    )
+
+# ---------- helpers Excel ----------
 def _norm(s: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(s).upper())
 
-def _build_colmap(cols) -> dict:
-    mp = {}
-    for c in cols: mp[_norm(c)] = c
-    return mp
+def _find_header_idx(df_raw: pd.DataFrame) -> int:
+    """Pelo seu print, o cabeçalho está na linha 2 => header=1. Mas deixo fallback."""
+    try:
+        # tentativa direta pelo padrão da sua planilha
+        _ = df_raw.iloc[1]
+        return 1
+    except Exception:
+        return 0
 
 def _find_mktcap_row(df: pd.DataFrame) -> int:
     first_col = df.columns[0]
     for i, val in df[first_col].items():
-        s = str(val).upper()
-        if "MKT" in s and "CAP" in s: return i
+        s = str(val).strip().lower().replace(" ", "")
+        if "mktcap" in s or s == "mktcap":
+            return i
     # fallback: primeira linha
     return df.index[0]
 
 def _year_rows(df: pd.DataFrame) -> list:
-    """retorna índices de linhas com anos (^\d{4}$) na 1ª coluna, preservando a ordem."""
     first_col = df.columns[0]
     mask = df[first_col].astype(str).str.fullmatch(r"\d{4}")
     return list(df.index[mask])
@@ -169,7 +228,7 @@ def main():
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{
-  --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
+  --stk-bg:#0e314a; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
   --stk-header-bg:#ffffff; --stk-header-fg:#0e314a;
 }
@@ -236,38 +295,30 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
+
+        # Market caps por ticker (preço * shares)
         mc_raw = prices.reindex(shares_classes.keys()) * pd.Series(shares_classes)
 
-        # Consolidações para CPLE e IGTI
+        # Consolidações (mantidas)
         cple_total = mc_raw.get("CPLE3", np.nan) + mc_raw.get("CPLE6", np.nan)
         igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
 
-        # ====== Ler Excel (Sheet1) e detectar cabeçalho/Mkt cap/anos ======
+        # ====== Ler Excel: Sheet1 com header=1 (linha 2 do seu print) ======
         try:
             raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=None)
         except FileNotFoundError:
-            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado."); return
+            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
+            return
 
-        # acha linha com vários tickers conhecidos
-        header_idx = None
-        known = {"CPLE6","EQTL3","ENGI11","SBSP3","NEOE3","ENEV3","EGIE3","MULT3","IGTI11","ALOS3","ELET3","ELET6"}
-        for i in range(min(8, len(raw))):
-            row = raw.iloc[i].astype(str).map(lambda x: _norm(x))
-            if any(_norm(k) in set(row) for k in known):
-                header_idx = i; break
-        if header_idx is None: header_idx = 0
-
+        header_idx = _find_header_idx(raw)   # usa 1 como padrão
         df = raw.iloc[header_idx+1:].reset_index(drop=True)
         df.columns = raw.iloc[header_idx].tolist()
-        colmap = _build_colmap(df.columns)
 
-        def resolve_col(ticker: str) -> str:
-            return colmap.get(_norm(ticker), ticker)
-
+        # linha 'Mkt cap' e linhas de anos
         mkt_row = _find_mktcap_row(df)
-        year_idx = _year_rows(df)  # lista de índices de linhas com 4 dígitos
+        year_idx = _year_rows(df)
 
-        # ====== Monta market caps e usa fluxos REAIS (inclui ENGI11) ======
+        # ====== Monta tabela final (usa fluxos reais da coluna ENGI11) ======
         final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
         rows = []
         for t in final_tickers:
@@ -292,21 +343,19 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # grava market cap na linha "Mkt cap"
-        for t in resultado.index:
-            col = resolve_col(t)
-            if col not in df.columns: df[col] = pd.NA
-            df.loc[mkt_row, col] = -abs(resultado.loc[t, "market_cap"])
-
-        # ====== XIRR: [ -Mkt cap ] + [ anos 4 dígitos ] ======
+        # ====== XIRR com [ -Mkt cap ] + [ anos ]
         today = datetime.now().date()
         irr_results = {}
         for t in resultado.index:
-            col = resolve_col(t)
-            # monta série na ordem correta
+            col = t  # nas suas colunas o nome é exatamente o ticker (maiúsculo)
+            if col not in df.columns:
+                irr_results[t] = np.nan
+                continue
             mktcap_val = pd.to_numeric(pd.Series([df.loc[mkt_row, col]]), errors="coerce").dropna().values
             flows_years = pd.to_numeric(df.loc[year_idx, col], errors="coerce").dropna().values
-            series = np.concatenate([mktcap_val, flows_years]) if len(mktcap_val) else flows_years
+            series = np.concatenate([ -np.abs(resultado.loc[t, "market_cap"]) ], dtype=float) if mktcap_val.size == 0 else np.array([ -np.abs(resultado.loc[t, "market_cap"]) ], dtype=float)
+            # Se a planilha também tem o mkt cap, ignoro o dela e uso o calculado (coerência com preço/shares atuais)
+            series = np.concatenate([series, flows_years])
             if series.size == 0:
                 irr_results[t] = np.nan
                 continue
@@ -319,6 +368,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
+
+        # Remove ELET3/ELET6 do gráfico
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -330,8 +381,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
-            cor_ouro = "rgb(201,140,46)"
-            cor_azul = "rgb(16,144,178)"
+            cor_ouro = "rgb(201,140,46)"; cor_azul = "rgb(16,144,178)"
             bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
             fig = go.Figure(go.Bar(
                 x=plot_data["empresa"], y=plot_data["irr"],
@@ -382,6 +432,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
