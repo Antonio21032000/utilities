@@ -345,7 +345,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     try:
         # ====== Tickers ======
         tickers_for_prices = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",  # incluí ENGI11 aqui
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
         ]
 
@@ -358,7 +358,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # usar diretamente ENGI11
+            "ENGI11": 2_289_420_000,
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -367,7 +367,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # Consolidações (mantidas para CPLE e IGTI; ENGI11 usa seu próprio preço e shares)
+        # Consolidações (mantidas para CPLE e IGTI)
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
@@ -393,7 +393,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
-                # ENGI11: usa preço e shares próprios
                 price = prices.get("ENGI11", np.nan)
                 shares = shares_classes["ENGI11"]
                 mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
@@ -413,24 +412,32 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
             return
 
-        df.columns = df.iloc[0]; df = df.iloc[1:]
+        # Cabeçalho na 1ª linha; normaliza nomes de colunas (strip + upper)
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
+        df.columns = [str(c).strip().upper() for c in df.columns]
 
-        for t in resultado.index:
+        # Garante colunas para todos os tickers finais (sem criar duplicatas por espaços/letras)
+        for t in [t.upper() for t in resultado.index]:
             if t not in df.columns:
                 df[t] = pd.NA
 
+        # Injeta market cap (sinal negativo) na primeira linha de dados
         target_row = df.index[0]
         today = datetime.now().date()
         for t in resultado.index:
-            df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
+            t_col = t.upper()
+            df.loc[target_row, t_col] = -abs(resultado.loc[t, "market_cap"])
 
+        # Converte para numérico
         for t in resultado.index:
-            df[t] = pd.to_numeric(df[t], errors="coerce")
+            df[t.upper()] = pd.to_numeric(df[t.upper()], errors="coerce")
 
         # ====== XIRR ======
         irr_results = {}
         for t in resultado.index:
-            series_cf = df[t].dropna()
+            col = t.upper()
+            series_cf = df[col].dropna()
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
@@ -446,7 +453,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        # Remove ELET3/ELET6 do gráfico
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -458,10 +465,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
-            # Cores personalizadas
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
-            cor_ouro = "rgb(201,140,46)"   # #C98C2E
-            cor_azul = "rgb(16,144,178)"   # #1090B2
+            cor_ouro = "rgb(201,140,46)"
+            cor_azul = "rgb(16,144,178)"
             bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
 
             fig = go.Figure(go.Bar(
@@ -489,7 +495,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
+        # Proxy para durations (não afeta fluxo de caixa):
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -500,11 +506,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             v = duration_map.loc["ENGI11"]
             set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration (agora inclui ENGI11) ======
+        # ====== Tabela de preços + Duration (inclui ENGI11) ======
         order = [
             "CPLE3","CPLE6",
             "IGTI3","IGTI4",
-            "ENGI3","ENGI4","ENGI11",   # <- incluído ENGI11 na tabela
+            "ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"
         ]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -514,7 +520,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        # Ordena por Duration (numérica) desc; NaN por último
+        # Ordena por Duration desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
@@ -532,6 +538,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
