@@ -72,7 +72,6 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # ---------- Timestamp helper ----------
 def format_ts_brt(ts) -> str:
-    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
     t = pd.to_datetime(ts, errors="coerce")
     if _isna(t): return ""
     try:
@@ -128,19 +127,15 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i
-            break
-    if header_row is None:
-        return pd.Series(dtype="float64")
+            header_row = i; break
+    if header_row is None: return pd.Series(dtype="float64")
 
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
         if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j
-            break
-    if dur_idx is None:
-        return pd.Series(dtype="float64")
+            dur_idx = j; break
+    if dur_idx is None: return pd.Series(dtype="float64")
 
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
@@ -153,8 +148,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
                 token = x.strip().upper()
                 if re.fullmatch(r"[A-Z]{3,5}\d{0,2}", token): cnt += 1
         if cnt > best_score: best_score, ticker_idx = cnt, j
-    if ticker_idx is None:
-        return pd.Series(dtype="float64")
+    if ticker_idx is None: return pd.Series(dtype="float64")
 
     tickers = df.iloc[:, ticker_idx].astype(str).str.strip().str.upper()
     durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
@@ -162,61 +156,6 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = pd.Series(durations.values, index=tickers.values)
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
-
-# ---------- HTML da tabela ----------
-def build_price_table_html(df: pd.DataFrame) -> str:
-    rows_html = []
-    for _, r in df.iterrows():
-        fonte = sblank(r.get("Fonte"))
-        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
-        preco = sfloat(r.get("Preço"))
-        ts = sblank(r.get("Timestamp"))
-        dur = sfloat(r.get("Duration"))
-        rows_html.append(
-            "<tr>"
-            f"<td>{sblank(r.get('Ticker'))}</td>"
-            f"<td class='num'>{preco}</td>"
-            f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
-            f"<td>{ts}</td>"
-            f"<td class='num'>{dur}</td>"
-            "</tr>"
-        )
-    return (
-        "<div class='table-wrap'>"
-        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
-        "<table class='styled-table'>"
-        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
-        "<tbody>" + "".join(rows_html) + "</tbody></table>"
-        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
-        "</div>"
-    )
-
-# ---------- helpers Excel ----------
-def _norm(s: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
-
-def _find_header_idx(df_raw: pd.DataFrame) -> int:
-    """Pelo seu print, o cabeçalho está na linha 2 => header=1. Mas deixo fallback."""
-    try:
-        # tentativa direta pelo padrão da sua planilha
-        _ = df_raw.iloc[1]
-        return 1
-    except Exception:
-        return 0
-
-def _find_mktcap_row(df: pd.DataFrame) -> int:
-    first_col = df.columns[0]
-    for i, val in df[first_col].items():
-        s = str(val).strip().lower().replace(" ", "")
-        if "mktcap" in s or s == "mktcap":
-            return i
-    # fallback: primeira linha
-    return df.index[0]
-
-def _year_rows(df: pd.DataFrame) -> list:
-    first_col = df.columns[0]
-    mask = df[first_col].astype(str).str.fullmatch(r"\d{4}")
-    return list(df.index[mask])
 
 # ---------- App ----------
 def main():
@@ -296,29 +235,32 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
 
-        # Market caps por ticker (preço * shares)
+        # Market caps (preço * shares)
         mc_raw = prices.reindex(shares_classes.keys()) * pd.Series(shares_classes)
 
-        # Consolidações (mantidas)
+        # Consolidações específicas
         cple_total = mc_raw.get("CPLE3", np.nan) + mc_raw.get("CPLE6", np.nan)
         igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
 
-        # ====== Ler Excel: Sheet1 com header=1 (linha 2 do seu print) ======
-        try:
-            raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=None)
-        except FileNotFoundError:
-            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
-            return
+        # ====== Ler Excel Sheet1 ======
+        raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # linha 2 = cabeçalho
+        # Coluna 'Tickers' contém 'Mkt cap' + anos
+        if 'Tickers' not in raw.columns:
+            # tenta alternativa caso esteja com espaço/variação
+            first_col = raw.columns[0]
+            raw = raw.rename(columns={first_col: 'Tickers'})
 
-        header_idx = _find_header_idx(raw)   # usa 1 como padrão
-        df = raw.iloc[header_idx+1:].reset_index(drop=True)
-        df.columns = raw.iloc[header_idx].tolist()
+        # linha Mkt cap
+        mkt_row_mask = raw['Tickers'].astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
+        if not mkt_row_mask.any():
+            raise ValueError("Linha 'Mkt cap' não encontrada na Sheet1.")
+        mkt_row = raw.index[mkt_row_mask][0]
 
-        # linha 'Mkt cap' e linhas de anos
-        mkt_row = _find_mktcap_row(df)
-        year_idx = _year_rows(df)
+        # linhas de anos (^\d{4}$)
+        year_rows = raw['Tickers'].astype(str).str.fullmatch(r"\d{4}")
+        year_idx = list(raw.index[year_rows])
 
-        # ====== Monta tabela final (usa fluxos reais da coluna ENGI11) ======
+        # ====== Monta tabela alvo (usa fluxos REAIS da coluna) ======
         final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
         rows = []
         for t in final_tickers:
@@ -343,24 +285,26 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== XIRR com [ -Mkt cap ] + [ anos ]
+        # ====== XIRR: [-market_cap_calculado] + fluxos da planilha ======
         today = datetime.now().date()
         irr_results = {}
         for t in resultado.index:
-            col = t  # nas suas colunas o nome é exatamente o ticker (maiúsculo)
-            if col not in df.columns:
+            if t not in raw.columns:
                 irr_results[t] = np.nan
                 continue
-            mktcap_val = pd.to_numeric(pd.Series([df.loc[mkt_row, col]]), errors="coerce").dropna().values
-            flows_years = pd.to_numeric(df.loc[year_idx, col], errors="coerce").dropna().values
-            series = np.concatenate([ -np.abs(resultado.loc[t, "market_cap"]) ], dtype=float) if mktcap_val.size == 0 else np.array([ -np.abs(resultado.loc[t, "market_cap"]) ], dtype=float)
-            # Se a planilha também tem o mkt cap, ignoro o dela e uso o calculado (coerência com preço/shares atuais)
-            series = np.concatenate([series, flows_years])
-            if series.size == 0:
-                irr_results[t] = np.nan
-                continue
+
+            # cabeça: -market cap calculado (array 1-D)
+            head = np.array([-abs(resultado.loc[t, "market_cap"])], dtype=float)
+
+            # fluxos anuais da planilha (apenas linhas de ano)
+            flows = pd.to_numeric(raw.loc[year_idx, t], errors="coerce").dropna().values.astype(float)
+
+            # série completa
+            series = head if flows.size == 0 else np.concatenate([head, flows])
+
+            # datas
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, len(series))]
-            irr_results[t] = compute_xirr(series.astype(float), dates_list)
+            irr_results[t] = compute_xirr(series, dates_list)
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
@@ -423,6 +367,34 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
+
+        # HTML table
+        def build_price_table_html(df: pd.DataFrame) -> str:
+            rows_html = []
+            for _, r in df.iterrows():
+                fonte = sblank(r.get("Fonte"))
+                badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
+                preco = sfloat(r.get("Preço"))
+                ts = sblank(r.get("Timestamp"))
+                dur = sfloat(r.get("Duration"))
+                rows_html.append(
+                    "<tr>"
+                    f"<td>{sblank(r.get('Ticker'))}</td>"
+                    f"<td class='num'>{preco}</td>"
+                    f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
+                    f"<td>{ts}</td>"
+                    f"<td class='num'>{dur}</td>"
+                    "</tr>"
+                )
+            return (
+                "<div class='table-wrap'>"
+                "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
+                "<table class='styled-table'>"
+                "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
+                "<tbody>" + "".join(rows_html) + "</tbody></table>"
+                "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
+                "</div>"
+            )
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         st.markdown("<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>", unsafe_allow_html=True)
