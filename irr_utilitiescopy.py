@@ -157,6 +157,18 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
 
+# ---------- Normalização de nomes ----------
+def norm_name(s: str) -> str:
+    # Upper + remove qualquer coisa que não seja A-Z ou 0-9
+    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
+
+def build_colmap(df: pd.DataFrame) -> dict:
+    """mapeia nome_normalizado -> nome_real"""
+    m = {}
+    for c in df.columns:
+        m[norm_name(c)] = c
+    return m
+
 # ---------- App ----------
 def main():
     st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
@@ -244,24 +256,27 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Ler Excel Sheet1 ======
         raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # linha 2 = cabeçalho
-        # Coluna 'Tickers' contém 'Mkt cap' + anos
-        if 'Tickers' not in raw.columns:
-            # tenta alternativa caso esteja com espaço/variação
-            first_col = raw.columns[0]
-            raw = raw.rename(columns={first_col: 'Tickers'})
 
+        # Normaliza nomes de colunas (para achar ENGI11 se vier com espaço/caso)
+        colmap = build_colmap(raw)          # normalizado -> real
+        want = {norm_name(t): t for t in [
+            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"
+        ]}
+
+        # Coluna 'Tickers' (anos + Mkt cap)
+        first_col = raw.columns[0]
+        if norm_name(first_col) != "TICKERS":
+            raw = raw.rename(columns={first_col: "Tickers"})
         # linha Mkt cap
-        mkt_row_mask = raw['Tickers'].astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
+        mkt_row_mask = raw["Tickers"].astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
         if not mkt_row_mask.any():
             raise ValueError("Linha 'Mkt cap' não encontrada na Sheet1.")
-        mkt_row = raw.index[mkt_row_mask][0]
-
         # linhas de anos (^\d{4}$)
-        year_rows = raw['Tickers'].astype(str).str.fullmatch(r"\d{4}")
+        year_rows = raw["Tickers"].astype(str).str.fullmatch(r"\d{4}")
         year_idx = list(raw.index[year_rows])
 
-        # ====== Monta tabela alvo (usa fluxos REAIS da coluna) ======
-        final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
+        # ====== Monta tabela alvo (usa fluxos REAIS) ======
+        final_tickers = list(want.values())
         rows = []
         for t in final_tickers:
             if t == "CPLE6":
@@ -285,19 +300,21 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== XIRR: [-market_cap_calculado] + fluxos da planilha ======
+        # ====== XIRR: [-market_cap_calculado] + fluxos da planilha (coluna encontrada por nome normalizado) ======
         today = datetime.now().date()
         irr_results = {}
         for t in resultado.index:
-            if t not in raw.columns:
+            norm_t = norm_name(t)
+            if norm_t not in colmap:
                 irr_results[t] = np.nan
                 continue
+            real_col = colmap[norm_t]
 
             # cabeça: -market cap calculado (array 1-D)
             head = np.array([-abs(resultado.loc[t, "market_cap"])], dtype=float)
 
-            # fluxos anuais da planilha (apenas linhas de ano)
-            flows = pd.to_numeric(raw.loc[year_idx, t], errors="coerce").dropna().values.astype(float)
+            # fluxos anuais
+            flows = pd.to_numeric(raw.loc[year_idx, real_col], errors="coerce").dropna().values.astype(float)
 
             # série completa
             series = head if flows.size == 0 else np.concatenate([head, flows])
@@ -404,6 +421,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
