@@ -156,7 +156,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
 
-# ---------- Normalização de nomes ----------
+# ---------- Normalização ----------
 def norm_name(s: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", str(s).upper())
 
@@ -164,8 +164,7 @@ def build_colmap(df: pd.DataFrame) -> dict:
     m = {}
     for c in df.columns:
         key = norm_name(c)
-        if key not in m:           # mantém a 1ª ocorrência (coluna mais à esquerda)
-            m[key] = c
+        if key not in m: m[key] = c  # 1ª ocorrência
     return m
 
 # ---------- App ----------
@@ -224,7 +223,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         st.markdown("<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>", unsafe_allow_html=True)
 
     try:
-        # ====== Tickers ======
+        # ====== Tickers que vamos cotar ======
         tickers_for_prices = [
             "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
@@ -239,44 +238,35 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,
+            "ENGI11": 2_289_420_000,                    # <- ENGI11 aqui!
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
 
-        # Market caps
+        # Market caps via preço*shares (nada de Sheet1)
         mc_raw = prices.reindex(shares_classes.keys()) * pd.Series(shares_classes)
         cple_total = mc_raw.get("CPLE3", np.nan) + mc_raw.get("CPLE6", np.nan)
         igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
 
-        # ====== Ler Excel Sheet1 ======
-        raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # linha 2 = cabeçalho
-
-        # Mapa de nomes normalizados -> nomes reais
-        def build_colmap(df: pd.DataFrame) -> dict:
-            m = {}
-            for c in df.columns:
-                key = norm_name(c)
-                if key not in m:
-                    m[key] = c
-            return m
+        # ====== Ler Excel (Sheet1) apenas para FLUXOS ======
+        raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # cabeçalho na linha 2
         colmap = build_colmap(raw)
 
-        # 1ª coluna SEMPRE usada como “Tickers” (evita duplicidade de cabeçalho)
-        tick_col_series = raw.iloc[:, 0]
+        # 1ª coluna -> detectar linhas de ANO; não precisamos de "Mkt cap"
+        tick_col = raw.iloc[:, 0]
 
-        # linha "Mkt cap"
-        mkt_row_mask = tick_col_series.astype(str).str.replace(" ", "", regex=False).str.lower().str.contains("mktcap", na=False)
-        if not mkt_row_mask.any():
-            raise ValueError("Linha 'Mkt cap' não encontrada na Sheet1.")
-
-        # linhas de anos (^\d{4}$)
-        year_rows = tick_col_series.astype(str).str.fullmatch(r"\d{4}")
+        # anos por regex
+        year_rows = tick_col.astype(str).str.fullmatch(r"\d{4}")
         year_idx = list(raw.index[year_rows])
 
-        # ====== Monta tabela alvo (usa fluxos REAIS) ======
+        # fallback se regex não pegar nada: valores numéricos entre 1900-2100
+        if len(year_idx) == 0:
+            ynum = pd.to_numeric(tick_col, errors="coerce")
+            year_idx = list(raw.index[(ynum >= 1900) & (ynum <= 2100)])
+
+        # ====== Monta tabela de mkt cap para cada ticker alvo ======
         final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
         rows = []
         for t in final_tickers:
@@ -301,7 +291,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== XIRR: [-market_cap] + fluxos da planilha ======
+        # ====== XIRR: usa -market_cap_calculado + FLUXOS da Sheet1 ======
         today = datetime.now().date()
         irr_results = {}
         for t in resultado.index:
@@ -325,7 +315,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # Remove ELET3/ELET6
+        # Remove ELET3/ELET6 do gráfico
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -369,7 +359,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]; set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços ======
+        # ====== Tabela de preços (inclui ENGI11) ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
