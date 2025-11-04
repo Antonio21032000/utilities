@@ -12,19 +12,19 @@ try:
 except Exception:
     npf = None
 
-
+# --- Helpers seguros contra NA/NaT ---
 def _isna(x):
     try:
         return pd.isna(x)
     except Exception:
         return x is None
 
-
 def sblank(x: object) -> str:
+    """String vazia se NA/NaT/None; caso contrário str(x)."""
     return "" if _isna(x) else str(x)
 
-
 def sfloat(x: object, nd: int = 2) -> str:
+    """Formata float com nd casas; vazio se NA/NaT; senão devolve str(x)."""
     if _isna(x):
         return ""
     try:
@@ -34,7 +34,6 @@ def sfloat(x: object, nd: int = 2) -> str:
 
 
 def compute_irr(cashflows: np.ndarray) -> float:
-    """IRR com períodos iguais."""
     values = np.asarray(cashflows, dtype=float)
     if npf is not None:
         try:
@@ -42,7 +41,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
         except Exception:
             pass
 
-    # bisseção
     def npv(rate: float) -> float:
         periods = np.arange(values.shape[0], dtype=float)
         return float(np.sum(values / (1.0 + rate) ** periods))
@@ -51,7 +49,7 @@ def compute_irr(cashflows: np.ndarray) -> float:
     f_low, f_high = npv(low), npv(high)
     if np.sign(f_low) == np.sign(f_high):
         return np.nan
-    for _ in range(200):
+    for _ in range(100):
         mid = (low + high) / 2.0
         f_mid = npv(mid)
         if abs(f_mid) < 1e-8:
@@ -64,7 +62,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
 
 
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
-    """XIRR por Newton; devolve NaN se não convergir."""
     if len(cashflows) != len(dates):
         return np.nan
     values = np.asarray(cashflows, dtype=float)
@@ -73,7 +70,7 @@ def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> floa
     years = [(d - base_date).days / 365.25 for d in dates]
 
     def xnpv(rate):
-        return sum(cf / (1 + rate) ** yr for cf, yr in zip(values, years))
+        return sum(cf / (1 + rate) ** year for cf, year in zip(values, years))
 
     rate = guess
     for _ in range(100):
@@ -97,21 +94,14 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 
-def format_ts_brt(ts) -> str:
-    t = pd.to_datetime(ts, errors="coerce")
-    if _isna(t):
-        return ""
-    try:
-        if t.tzinfo is None:
-            t = t.tz_localize("UTC")
-        t = t.tz_convert("America/Sao_Paulo")
-    except Exception:
-        pass
-    return t.strftime("%Y-%m-%d %H:%M")
-
-
-# ---------- Yahoo prices ----------
+# ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
+    """
+    Retorna:
+      - prices: pd.Series (preço por ticker, sem .SA)
+      - meta:   pd.DataFrame(Fonte, Timestamp) por ticker
+    Tenta intraday 1m; se faltar, usa daily close.
+    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
@@ -123,25 +113,30 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         intraday = intraday.ffill()
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
-        intraday, ts1m = pd.DataFrame(), None
+        intraday = pd.DataFrame()
+        ts1m = None
 
     # Daily close (batch)
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
     except Exception:
-        daily, tsd = pd.DataFrame(), None
+        daily = pd.DataFrame()
+        tsd = None
 
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
+
         if ts1m is not None and tsa in getattr(intraday, "columns", []):
             v = intraday.loc[ts1m, tsa]
             if pd.notna(v):
-                val, used_ts, used_src = float(v), ts1m, "intraday 1m"
+                val = float(v); used_ts = ts1m; used_src = "intraday 1m"
+
         if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
-                val, used_ts, used_src = float(v), tsd, "daily close"
+                val = float(v); used_ts = tsd; used_src = "daily close"
+
         prices[t] = val
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
@@ -151,13 +146,18 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     return price_series, meta
 
 
-# ---------- Duration loader (opcional) ----------
+# ---------- Duration loader robusto (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
+    """
+    Lê a aba 'duration' mesmo quando não há cabeçalho padrão.
+    Retorna: Series indexado por Ticker (str) com valores de Duration (float).
+    """
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
     except Exception:
         return pd.Series(dtype="float64")
 
+    # 1) acha a linha do "Duration"
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
@@ -166,6 +166,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if header_row is None:
         return pd.Series(dtype="float64")
 
+    # 2) índice da coluna 'Duration'
     header_vals = raw.iloc[header_row].tolist()
     dur_idx = None
     for j, v in enumerate(header_vals):
@@ -175,8 +176,10 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
+    # 3) dados abaixo do cabeçalho
     df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
+    # 4) escolhe a coluna de tickers (padrão AAAAA9)
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx:
@@ -197,22 +200,58 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
 
     out = pd.Series(durations.values, index=tickers.values)
-    out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
+    out = out[~out.index.isin(["", "NAN", "NONE"])]
+    out = out.dropna()
     return out
 
 
-# ---------- Normalização ----------
-def norm_name(s: str) -> str:
-    return re.sub(r"[^A-Z0-9]", "", str(s).upper())
+# ---------- Helpers de formatação ----------
+def format_ts_brt(ts) -> str:
+    """Converte qualquer timestamp para America/Sao_Paulo e formata."""
+    t = pd.to_datetime(ts, errors="coerce")
+    if _isna(t):
+        return ""
+    try:
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")  # yfinance costuma vir em UTC
+        t = t.tz_convert("America/Sao_Paulo")
+    except Exception:
+        pass
+    return t.strftime("%Y-%m-%d %H:%M")
 
 
-def build_colmap(df: pd.DataFrame) -> dict:
-    m = {}
-    for c in df.columns:
-        key = norm_name(c)
-        if key not in m:  # mantém a primeira ocorrência
-            m[key] = c
-    return m
+# ---------- Pretty HTML table (sem truthiness de NA/NaT) ----------
+def build_price_table_html(df: pd.DataFrame) -> str:
+    """
+    Espera colunas: Ticker, Preço, Fonte, Timestamp, Duration (opcional)
+    """
+    rows_html = []
+    for _, r in df.iterrows():
+        fonte = sblank(r.get("Fonte"))
+        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
+        preco = sfloat(r.get("Preço"))
+        ts = sblank(r.get("Timestamp"))  # já vem formatado em BRT
+        dur = sfloat(r.get("Duration"))
+
+        rows_html.append(
+            "<tr>"
+            f"<td>{sblank(r.get('Ticker'))}</td>"
+            f"<td class='num'>{preco}</td>"
+            f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
+            f"<td>{ts}</td>"
+            f"<td class='num'>{dur}</td>"
+            "</tr>"
+        )
+
+    return (
+        "<div class='table-wrap'>"
+        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
+        "<table class='styled-table'>"
+        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
+        "<tbody>" + "".join(rows_html) + "</tbody></table>"
+        "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
+        "</div>"
+    )
 
 
 # ---------- App ----------
@@ -224,25 +263,58 @@ def main():
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+
 :root{
-  --stk-bg:#0e314a; --stk-grid:rgba(255,255,255,.12);
+  --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
-  --stk-header-bg:#ffffff; --stk-header-fg:#0e314a;
+  --stk-header-bg:#ffffff;           /* Fundo branco no retângulo do topo */
+  --stk-header-fg:#0e314a;           /* Título azul */
 }
+
 html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
-html, body, .stApp,[data-testid="stAppViewContainer"], [data-testid="stDecoration"],
-header[data-testid="stHeader"], header[data-testid="stHeader"] *,[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
+html, body, .stApp,
+[data-testid="stAppViewContainer"], [data-testid="stDecoration"],
+header[data-testid="stHeader"], header[data-testid="stHeader"] *,
+[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
 header[data-testid="stHeader"]{box-shadow:none !important;}
+
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
-.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px; margin:16px 0 16px; box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
-.header-inner{position:relative; height:48px; display:flex; align-items:center; justify-content:center;}
-.stk-logo{position:absolute; left:16px; top:50%; transform:translateY(-50%); height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
-.app-header h1{margin:0; color:var(--stk-header-fg); font-weight:800; letter-spacing:.4px;}
-.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
+
+/* Header */
+.app-header{
+  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
+  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
+  background:var(--stk-header-bg);   /* antes: var(--stk-gold) */
+  padding:18px 20px; border-radius:12px;
+  margin:16px 0 16px;
+  box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);
+}
+.header-inner{
+  position:relative; height:48px;
+  display:flex; align-items:center; justify-content:center;
+}
+.stk-logo{
+  position:absolute; left:16px; top:50%; transform:translateY(-50%);
+  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
+  height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
+}
+.app-header h1{
+  margin:0; color:var(--stk-header-fg); /* antes: #fff */
+  font-weight:800; letter-spacing:.4px;
+}
+.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
+
+/* Nota */
+.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
+             padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
+
+/* Tabela dark */
 .table-wrap{margin:14px 0 8px;}
 .table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
-.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
-.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600; border-bottom:1px solid rgba(255,255,255,.08);}
+.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
+              border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
+.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600;
+                       border-bottom:1px solid rgba(255,255,255,.08);}
 .styled-table tbody td{color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);}
 .styled-table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
 .styled-table tbody tr:last-child td{border-bottom:none;}
@@ -261,20 +333,23 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     if os.path.exists(LOGO_PATH):
         with open(LOGO_PATH, "rb") as f:
             logo_b64 = base64.b64encode(f.read()).decode("utf-8")
+
     if logo_b64:
         st.markdown(
             "<div class='app-header'><div class='header-inner'>"
             f"<img class='stk-logo' src='data:image/png;base64,{logo_b64}' alt='STK'/>"
             "<h1>IRR Real</h1>"
-            "</div></div>", unsafe_allow_html=True)
+            "</div></div>",
+            unsafe_allow_html=True,
+        )
     else:
         st.markdown("<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>",
                     unsafe_allow_html=True)
 
     try:
-        # ====== Tickers a serem cotados ======
+        # ====== Tickers ======
         tickers_for_prices = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
         ]
 
@@ -282,41 +357,38 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices_series, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
         prices = prices_series.astype(float)
 
-        # ====== Nº de ações ======
+        # ====== Shares ======
         shares_classes = {
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # <- ENGI11
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
+        shares_series = pd.Series(shares_classes).reindex(prices.index)
+        mc_raw = prices * shares_series
 
-        # Market caps por preço*shares (sem depender do Excel)
-        mc_raw = prices.reindex(shares_classes.keys()) * pd.Series(shares_classes)
-        cple_total = mc_raw.get("CPLE3", np.nan) + mc_raw.get("CPLE6", np.nan)
-        igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
+        # Consolidações
+        if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
+            cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
+        else:
+            raise ValueError("Preços de CPLE3/CPLE6 não encontrados.")
+        if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
+            igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
+        else:
+            raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
+        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
+            engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
+        else:
+            raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
 
-        # ====== Ler Excel Sheet1 apenas para FLUXOS ======
-        raw = pd.read_excel("irrdash3.xlsx", sheet_name="Sheet1", header=1)  # cabeçalho na linha 2
-        colmap = build_colmap(raw)
-
-        # 1ª coluna contém "Tickers/Mkt cap/2025..."; detectamos linhas de ANO de forma tolerante
-        tick_col = raw.iloc[:, 0].astype(str).str.strip()
-
-        # anos por regex exata
-        year_mask = tick_col.str.fullmatch(r"\d{4}")
-        year_idx = list(raw.index[year_mask])
-
-        # fallback numérico: 1900-2100
-        if len(year_idx) == 0:
-            tick_num = pd.to_numeric(tick_col, errors="coerce")
-            year_idx = list(raw.index[(tick_num >= 1900) & (tick_num <= 2100)])
-
-        # ====== Monta base para cálculo (mkt cap + fluxos por ticker) ======
-        final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
+        # ====== Tabela final (para XIRR)
+        final_tickers = [
+            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
+            "MULT3","ALOS3","IGTI11","ENGI11",
+        ]
         rows = []
         for t in final_tickers:
             if t == "CPLE6":
@@ -328,9 +400,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
-                price = prices.get("ENGI11", np.nan)
-                shares = shares_classes["ENGI11"]
-                mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
+                price = np.nan
+                shares = shares_classes["ENGI3"] + shares_classes["ENGI4"]
+                mc = engi_total
             else:
                 price = prices.get(t, np.nan)
                 shares = shares_classes.get(t, np.nan)
@@ -340,45 +412,47 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== XIRR com fallback para IRR simples ======
-        today = datetime.now().date()
-        irr_results = {}
+        # ====== Excel dos fluxos ======
+        try:
+            df = pd.read_excel("irrdash3.xlsx")
+        except FileNotFoundError:
+            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
+            return
+
+        df.columns = df.iloc[0]; df = df.iloc[1:]
 
         for t in resultado.index:
-            key = norm_name(t)
-            if key not in colmap:
+            if t not in df.columns:
+                df[t] = pd.NA
+
+        target_row = df.index[0]
+        today = datetime.now().date()
+        for t in resultado.index:
+            df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
+
+        for t in resultado.index:
+            df[t] = pd.to_numeric(df[t], errors="coerce")
+
+        # ====== XIRR ======
+        irr_results = {}
+        for t in resultado.index:
+            series_cf = df[t].dropna()
+            if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
-
-            real_col = colmap[key]
-            # cabeça = -mkt cap (investimento hoje)
-            head = np.array([-abs(resultado.loc[t, "market_cap"])], dtype=float)
-
-            # fluxos anuais a partir das linhas de anos
-            flows = pd.to_numeric(raw.loc[year_idx, real_col], errors="coerce").dropna().values.astype(float)
-            series = head if flows.size == 0 else np.concatenate([head, flows])
-
-            # datas: hoje + 31/12 para cada fluxo subsequente
-            dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, len(series))]
-
-            xirr_val = compute_xirr(series, dates_list)
-            if pd.isna(xirr_val):
-                # fallback para IRR simples (mesmo número de períodos)
-                irr_simple = compute_irr(series)
-                irr_results[t] = irr_simple
-            else:
-                irr_results[t] = xirr_val
+            cashflows = series_cf.values.astype(float).copy()
+            n_periods = len(cashflows)
+            dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
+            irr_results[t] = compute_xirr(cashflows, dates_list)
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
-        # ajustes específicos (mantidos do seu código)
         for t in ["MULT3","ALOS3","IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
-
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # Remove ELET3/ELET6 do gráfico
+        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -390,6 +464,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
+            # Cores personalizadas
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
             cor_ouro = "rgb(201,140,46)"   # #C98C2E
             cor_azul = "rgb(16,144,178)"   # #1090B2
@@ -420,63 +495,34 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy úteis se houver ENGI11/IGTI11 com duration e faltarem as ON/PN
+        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
-
         if "IGTI11" in duration_map.index:
-            v = duration_map.loc("IGTI11") if callable(getattr(duration_map, "__call__", None)) else duration_map.loc["IGTI11"]
+            v = duration_map.loc["IGTI11"]
             set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
         if "ENGI11" in duration_map.index:
-            v = duration_map.loc("ENGI11") if callable(getattr(duration_map, "__call__", None)) else duration_map.loc["ENGI11"]
+            v = duration_map.loc["ENGI11"]
             set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços (inclui ENGI11) ======
-        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
+        # ====== Tabela de preços + Duration (ordenada por Duration) ======
+        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
 
         tbl = tbl.rename_axis("Ticker").reset_index()
-        # pode não existir duration -> mapeia se houver
-        if len(duration_map):
-            tbl["Duration"] = tbl["Ticker"].map(duration_map)
-            tbl["__dur_num"] = pd.to_numeric(tbl.get("Duration", pd.Series(index=tbl.index)), errors="coerce")
-            tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns=["__dur_num"])
-        else:
-            tbl["Duration"] = np.nan
+        tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        def build_price_table_html(df: pd.DataFrame) -> str:
-            rows_html = []
-            for _, r in df.iterrows():
-                fonte = sblank(r.get("Fonte"))
-                badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
-                preco = sfloat(r.get("Preço"))
-                ts = sblank(r.get("Timestamp"))
-                dur = sfloat(r.get("Duration"))
-                rows_html.append(
-                    "<tr>"
-                    f"<td>{sblank(r.get('Ticker'))}</td>"
-                    f"<td class='num'>{preco}</td>"
-                    f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
-                    f"<td>{ts}</td>"
-                    f"<td class='num'>{dur}</td>"
-                    "</tr>"
-                )
-            return (
-                "<div class='table-wrap'>"
-                "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
-                "<table class='styled-table'>"
-                "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
-                "<tbody>" + "".join(rows_html) + "</tbody></table>"
-                "<div class='table-note'>intraday 1m pode ter atraso de ~15 min • Timestamp em horário de Brasília.</div>"
-                "</div>"
-            )
+        # Ordena por Duration (numérica) desc; NaN por último
+        tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
+        tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
+        # Nota
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
@@ -488,10 +534,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
-
-
-
 
 
 
