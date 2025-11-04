@@ -32,7 +32,6 @@ def sfloat(x: object, nd: int = 2) -> str:
     except Exception:
         return sblank(x)
 
-
 def compute_irr(cashflows: np.ndarray) -> float:
     values = np.asarray(cashflows, dtype=float)
     if npf is not None:
@@ -60,7 +59,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
             low, f_low = mid, f_mid
     return mid
 
-
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     if len(cashflows) != len(dates):
         return np.nan
@@ -86,13 +84,11 @@ def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> floa
             return np.nan
     return rate
 
-
 def cap_to_first_digits_mln(value, digits=6):
     if pd.isna(value):
         return pd.NA
     total_mln = round(value / 1e6)
     return int(str(int(total_mln))[:digits])
-
 
 # ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
@@ -144,7 +140,6 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     price_series = pd.Series(prices, name="preco")
     meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
-
 
 # ---------- Duration loader robusto (aba 'duration') ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
@@ -204,7 +199,6 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = out.dropna()
     return out
 
-
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
     """Converte qualquer timestamp para America/Sao_Paulo e formata."""
@@ -218,7 +212,6 @@ def format_ts_brt(ts) -> str:
     except Exception:
         pass
     return t.strftime("%Y-%m-%d %H:%M")
-
 
 # ---------- Pretty HTML table (sem truthiness de NA/NaT) ----------
 def build_price_table_html(df: pd.DataFrame) -> str:
@@ -253,7 +246,6 @@ def build_price_table_html(df: pd.DataFrame) -> str:
         "</div>"
     )
 
-
 # ---------- App ----------
 def main():
     st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
@@ -282,9 +274,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 /* Header */
 .app-header{
-  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
-  background:var(--stk-header-bg);   /* antes: var(--stk-gold) */
+  background:var(--stk-header-bg);
   padding:18px 20px; border-radius:12px;
   margin:16px 0 16px;
   box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);
@@ -295,14 +285,12 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 }
 .stk-logo{
   position:absolute; left:16px; top:50%; transform:translateY(-50%);
-  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
   height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
 }
 .app-header h1{
-  margin:0; color:var(--stk-header-fg); /* antes: #fff */
+  margin:0; color:var(--stk-header-fg);
   font-weight:800; letter-spacing:.4px;
 }
-.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
 
 /* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
@@ -362,7 +350,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # << FIXADO: nº de ações informado
+            "ENGI11": 2_289_420_000,  # FIXO
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -372,7 +360,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         mc_raw = prices * shares_series
 
         # ====== Consolidações ======
-        # ENGI11: usar preço ENGI11 * ações ENGI11; se preço estiver NaN, fallback antigo (ENGI3 + ENGI4)
         engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         if pd.notna(engi11_price) and engi11_price > 0:
@@ -430,17 +417,22 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
             return
 
-        df.columns = df.iloc[0]; df = df.iloc[1:]
+        # IMPORTANTE: reset do índice para a primeira linha de dados ser 0
+        df.columns = df.iloc[0]
+        df = df.iloc[1:].reset_index(drop=True)
 
+        # Garante colunas esperadas
         for t in resultado.index:
             if t not in df.columns:
                 df[t] = pd.NA
 
-        target_row = df.index[0]
+        # Injeta CF inicial na PRIMEIRA linha de dados (linha 0)
+        target_row = 0
         today = datetime.now().date()
         for t in resultado.index:
             df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
 
+        # Numeriza
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
 
@@ -448,7 +440,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         irr_results = {}
         for t in resultado.index:
             series_cf = df[t].dropna()
-            if series_cf.empty:
+            # precisa de pelo menos 2 fluxos para XIRR fazer sentido
+            if series_cf.size < 2:
                 irr_results[t] = np.nan
                 continue
             cashflows = series_cf.values.astype(float).copy()
@@ -463,7 +456,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        # ====== Remover ELET3/ELET6 do gráfico
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -506,7 +499,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4; ENGI11 agora é real, mas pode propagar se quiser
+        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 pode propagar se existir
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -545,13 +538,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
 
-
 if __name__ == "__main__":
     main()
-
-
-
-
 
 
 
