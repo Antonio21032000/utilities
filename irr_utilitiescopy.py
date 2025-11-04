@@ -94,7 +94,7 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 
-# ---------- Yahoo helpers ----------
+# ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
     """
     Retorna:
@@ -144,31 +144,6 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     price_series = pd.Series(prices, name="preco")
     meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
-
-
-def fetch_shares_outstanding(ticker: str) -> float:
-    """
-    Tenta pegar a quantidade de ações pelo Yahoo:
-      - fast_info.shares_outstanding
-      - info['sharesOutstanding']
-    Retorna float ou np.nan.
-    """
-    try:
-        tk = yf.Ticker(f"{ticker}.SA")
-        # fast_info (novo yfinance)
-        so = getattr(tk, "fast_info", None)
-        if so and isinstance(so, dict):
-            v = so.get("shares_outstanding", None)
-            if v and v > 0:
-                return float(v)
-        # fallback legacy
-        info = getattr(tk, "info", {}) or {}
-        v = info.get("sharesOutstanding", None)
-        if v and v > 0:
-            return float(v)
-    except Exception:
-        pass
-    return np.nan
 
 
 # ---------- Duration loader robusto (aba 'duration') ----------
@@ -292,7 +267,7 @@ def main():
 :root{
   --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
-  --stk-header-bg:#ffffff;           /* Fundo branco no retângulo do topo */
+  --stk-header-bg:#ffffff;           /* Fundo branco do retângulo do topo */
   --stk-header-fg:#0e314a;           /* Título azul */
 }
 
@@ -307,39 +282,59 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 /* Header */
 .app-header{
-  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
-  background:var(--stk-header-bg);   /* antes: var(--stk-gold) */
-  padding:18px 20px; border-radius:12px;
+  background:var(--stk-header-bg);
+  padding:18px 20px;
+  border-radius:12px;
   margin:16px 0 16px;
   box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);
 }
 .header-inner{
-  position:relative; height:48px;
-  display:flex; align-items:center; justify-content:center;
+  position:relative;
+  height:48px;
+  display:flex;
+  align-items:center;
+  justify-content:center;  /* centraliza o título */
 }
 .stk-logo{
-  position:absolute; left:16px; top:50%; transform:translateY(-50%);
-  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
-  height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
+  position:absolute;
+  left:16px;
+  top:50%;
+  transform:translateY(-50%);
+  height:44px; width:auto;
+  filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
 }
 .app-header h1{
-  margin:0; color:var(--stk-header-fg); /* antes: #fff */
-  font-weight:800; letter-spacing:.4px;
+  margin:0;
+  color:var(--stk-header-fg);
+  font-weight:800;
+  letter-spacing:.4px;
 }
-.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
 
 /* Nota */
-.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
-             padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
+.footer-note{
+  background:var(--stk-note-bg);
+  border:1px solid var(--stk-note-bd);
+  border-radius:10px;
+  padding:16px 18px;
+  color:var(--stk-note-fg);
+  text-align:center;
+  margin:18px 0 8px;
+  font-size:1.1rem;
+  font-weight:600;
+  width:100%;
+}
 
 /* Tabela dark */
 .table-wrap{margin:14px 0 8px;}
 .table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
-.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
-              border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
-.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600;
-                       border-bottom:1px solid rgba(255,255,255,.08);}
+.styled-table{
+  width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;
+}
+.styled-table thead th{
+  background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600;
+  border-bottom:1px solid rgba(255,255,255,.08);
+}
 .styled-table tbody td{color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);}
 .styled-table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
 .styled-table tbody tr:last-child td{border-bottom:none;}
@@ -352,7 +347,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # Header
+    # Header (logo opcional à esquerda; título centralizado)
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
@@ -363,13 +358,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         st.markdown(
             "<div class='app-header'><div class='header-inner'>"
             f"<img class='stk-logo' src='data:image/png;base64,{logo_b64}' alt='STK'/>"
-            "<h1>IRR Real</h1>"
+            "<h1>IRR real</h1>"
             "</div></div>",
             unsafe_allow_html=True,
         )
     else:
-        st.markdown("<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>",
-                    unsafe_allow_html=True)
+        st.markdown(
+            "<div class='app-header'><div class='header-inner'><h1>IRR real</h1></div></div>",
+            unsafe_allow_html=True
+        )
 
     try:
         # ====== Tickers ======
@@ -383,47 +380,34 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices = prices_series.astype(float)
 
         # ====== Shares ======
-        # Você pode fixar ENGI11 aqui (se souber o número exato) para não depender do Yahoo:
         shares_classes = {
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            # "ENGI11":  XXX_XXX_XXX,  # <- opcional: se quiser travar manualmente
+            "ENGI11": 2_289_420_000,  # número de ações informado
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
-
-        def get_shares(t: str) -> float:
-            """Prioriza dicionário; se faltar e for ENGI11, tenta Yahoo; senão NaN."""
-            if t in shares_classes:
-                return float(shares_classes[t])
-            if t == "ENGI11":
-                so = fetch_shares_outstanding("ENGI11")
-                return float(so) if (so is not None and so > 0) else np.nan
-            return np.nan
-
-        shares_series = pd.Series({t: get_shares(t) for t in prices.index}).reindex(prices.index)
+        shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
         # ====== Consolidações ======
-        # ENGI11: NOVO -> usar preço ENGI11 * ações ENGI11; fallback = método antigo (ENGI3 + ENGI4)
+        # ENGI11: usar preço ENGI11 * ações ENGI11; fallback antigo se preço indisponível
         engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
-        if pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0 and engi11_shares > 0:
+        if pd.notna(engi11_price) and engi11_price > 0:
             engi_total = engi11_price * engi11_shares
-            engi_calc_source = "ENGI11 price × ENGI11 shares (Yahoo)"
+            engi_calc_source = "ENGI11 price × ENGI11 shares (fixo)"
         else:
-            # fallback: método antigo
             if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
                 engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-                engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares"
-                st.info("ENGI11: não foi possível obter a quantidade de ações diretamente; usando fallback (ENGI3+ENGI4).")
+                engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares (preço ENGI11 indisponível)"
+                st.info("ENGI11: preço não disponível; usando fallback (ENGI3+ENGI4).")
             else:
                 raise ValueError("Não foi possível calcular o market cap de ENGI (ENGI11 e fallback indisponíveis).")
 
-        # Demais pares (mantidos):
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
@@ -442,19 +426,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         for t in final_tickers:
             if t == "CPLE6":
                 price = prices.get("CPLE6", np.nan)
-                shares = (shares_classes.get("CPLE3", np.nan) +
-                          shares_classes.get("CPLE6", np.nan))
+                shares = shares_classes["CPLE3"] + shares_classes["CPLE6"]
                 mc = cple_total
             elif t == "IGTI11":
                 price = np.nan
-                shares = (shares_classes.get("IGTI3", np.nan) +
-                          shares_classes.get("IGTI4", np.nan))
+                shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
-                # NOVO: usar ENGI11 real se disponível (preço e ações),
-                #       mas mc vem do cálculo já definido (engi_total).
                 price = prices.get("ENGI11", np.nan)
-                shares = shares_series.get("ENGI11", np.nan)
+                shares = shares_classes["ENGI11"]
                 mc = engi_total
             else:
                 price = prices.get(t, np.nan)
@@ -505,7 +485,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        # ====== Remover ELET3/ELET6 do gráfico
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
         # ====== Gráfico ======
@@ -517,10 +497,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
-            # Cores personalizadas
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
-            cor_ouro = "rgb(201,140,46)"   # #C98C2E
-            cor_azul = "rgb(16,144,178)"   # #1090B2
+            cor_ouro = "rgb(201,140,46)"
+            cor_azul = "rgb(16,144,178)"
             bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
 
             fig = go.Figure(go.Bar(
@@ -548,20 +527,19 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4 (mantido); ENGI11 agora já é real, mas deixo fallback se quiser reaproveitar dado
+        # Proxy opcional
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
         if "IGTI11" in duration_map.index:
             v = duration_map.loc["IGTI11"]
             set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
-        # Se existir duration em ENGI11 e faltar em ENGI3/4, opcionalmente propagar:
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]
             if pd.notna(v):
                 set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration (ordenada por Duration) ======
+        # ====== Tabela de preços + Duration
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -571,19 +549,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        # Ordena por Duration (numérica) desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
-        # Nota
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
             unsafe_allow_html=True,
         )
 
-        # Transparência da fonte de cálculo do ENGI total:
         st.caption(f"ENGI total calculado via: {engi_calc_source}")
 
     except Exception as e:
@@ -592,6 +567,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
