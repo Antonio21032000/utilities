@@ -88,11 +88,48 @@ def cap_to_first_digits_mln(value, digits=6):
     total_mln = round(value / 1e6)
     return int(str(int(total_mln))[:digits])
 
+# ---------- Fetch de preço robusto ----------
+def fetch_single_price(tsa: str):
+    """Tenta 1m -> 1d -> último close para um ticker '.SA'. Retorna (preco, fonte, ts)."""
+    try:
+        t = yf.Ticker(tsa)
+        # intraday 1m
+        try:
+            h = t.history(period="1d", interval="1m")
+            if not h.empty and pd.notna(h["Close"].iloc[-1]):
+                return float(h["Close"].iloc[-1]), "intraday 1m (single)", h.index[-1]
+        except Exception:
+            pass
+        # diário (último)
+        try:
+            h = t.history(period="5d", interval="1d")
+            if not h.empty and pd.notna(h["Close"].iloc[-1]):
+                return float(h["Close"].iloc[-1]), "daily close (single)", h.index[-1]
+        except Exception:
+            pass
+        # fast_info
+        try:
+            p = t.fast_info["last_price"]
+            if pd.notna(p):
+                return float(p), "fast_info", None
+        except Exception:
+            pass
+    except Exception:
+        pass
+    return np.nan, "N/A", None
+
 # ---------- Prices (intraday + fallback) ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
+    """
+    Retorna:
+      - prices: pd.Series (preço por ticker, sem .SA)
+      - meta:   pd.DataFrame(Fonte, Timestamp) por ticker
+    Tenta intraday 1m; se faltar, usa daily; se ainda faltar, busca individual.
+    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
+    # Batch intraday 1m
     try:
         intraday = yf.download(tickers_sa, period="1d", interval="1m", progress=False)["Close"]
         if isinstance(intraday, pd.Series):
@@ -102,27 +139,40 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     except Exception:
         intraday = pd.DataFrame(); ts1m = None
 
+    # Batch daily
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
     except Exception:
         daily = pd.DataFrame(); tsd = None
 
+    # Monta série
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
+
         if ts1m is not None and tsa in getattr(intraday, "columns", []):
             v = intraday.loc[ts1m, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = ts1m; used_src = "intraday 1m"
+
         if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
                 val = float(v); used_ts = tsd; used_src = "daily close"
-        prices[t] = val; source[t] = used_src if used_src else "N/A"; ts_used[t] = used_ts
 
-    return pd.Series(prices, name="preco"), pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
+        # Fallback individual (resolve o ENGI11 quando o batch falha)
+        if pd.isna(val):
+            val, used_src, used_ts = fetch_single_price(tsa)
 
-# ---------- Duration loader (aba 'duration') ----------
+        prices[t] = val
+        source[t] = used_src if used_src is not None else "N/A"
+        ts_used[t] = used_ts
+
+    price_series = pd.Series(prices, name="preco")
+    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
+    return price_series, meta
+
+# ---------- Duration loader robusto ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     try:
         raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
@@ -144,23 +194,27 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
-    df = raw.iloc[header_row+1:].reset_index(drop=True)
+    df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
-    ticker_idx, best = None, -1
+    ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
-        if j == dur_idx: continue
-        s = df.iloc[:, j].dropna(); cnt = 0
+        if j == dur_idx:
+            continue
+        s = df.iloc[:, j].dropna()
+        cnt = 0
         for x in s:
             if isinstance(x, str):
                 token = x.strip().upper()
                 if re.fullmatch(r"[A-Z]{3,5}\d{0,2}", token):
                     cnt += 1
-        if cnt > best: best, ticker_idx = cnt, j
+        if cnt > best_score:
+            best_score, ticker_idx = cnt, j
     if ticker_idx is None:
         return pd.Series(dtype="float64")
 
     tickers = df.iloc[:, ticker_idx].astype(str).str.strip().str.upper()
     durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
+
     out = pd.Series(durations.values, index=tickers.values)
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
@@ -168,9 +222,11 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
     t = pd.to_datetime(ts, errors="coerce")
-    if _isna(t): return ""
+    if _isna(t):
+        return ""
     try:
-        if t.tzinfo is None: t = t.tz_localize("UTC")
+        if t.tzinfo is None:
+            t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
     except Exception:
         pass
@@ -181,15 +237,20 @@ def build_price_table_html(df: pd.DataFrame) -> str:
     for _, r in df.iterrows():
         fonte = sblank(r.get("Fonte"))
         badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
+        preco = sfloat(r.get("Preço"))
+        ts = sblank(r.get("Timestamp"))
+        dur = sfloat(r.get("Duration"))
+
         rows_html.append(
             "<tr>"
             f"<td>{sblank(r.get('Ticker'))}</td>"
-            f"<td class='num'>{sfloat(r.get('Preço'))}</td>"
+            f"<td class='num'>{preco}</td>"
             f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
-            f"<td>{sblank(r.get('Timestamp'))}</td>"
-            f"<td class='num'>{sfloat(r.get('Duration'))}</td>"
+            f"<td>{ts}</td>"
+            f"<td class='num'>{dur}</td>"
             "</tr>"
         )
+
     return (
         "<div class='table-wrap'>"
         "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
@@ -209,34 +270,25 @@ def main():
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-
 :root{
   --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
   --stk-header-bg:#ffffff; --stk-header-fg:#0e314a;
 }
-
 html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
-html, body, .stApp,
-[data-testid="stAppViewContainer"], [data-testid="stDecoration"],
-header[data-testid="stHeader"], header[data-testid="stHeader"] *,
-[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
+html, body, .stApp,[data-testid="stAppViewContainer"], [data-testid="stDecoration"],
+header[data-testid="stHeader"], header[data-testid="stHeader"] *, [data-testid="stToolbar"], [data-testid="stToolbar"] *{
+  background:var(--stk-bg) !important;
+}
 header[data-testid="stHeader"]{box-shadow:none !important;}
-
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
-
-/* Header */
-.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px;
-            margin:16px 0 16px; box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
+.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px; margin:16px 0 16px;
+            box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
 .header-inner{position:relative; height:48px; display:flex; align-items:center; justify-content:center;}
 .stk-logo{position:absolute; left:16px; top:50%; transform:translateY(-50%); height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
 .app-header h1{margin:0; color:var(--stk-header-fg); font-weight:800; letter-spacing:.4px;}
-
-/* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
              padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
-
-/* Tabela dark */
 .table-wrap{margin:14px 0 8px;}
 .table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
 .styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
@@ -287,7 +339,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,
+            "ENGI11": 2_289_420_000,  # informado por você
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -297,30 +349,33 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         mc_raw = prices * shares_series
 
         # ====== Consolidações ======
+        # ENGI11 = preço (Yahoo) * 2.289.420.000; se preço indisponível, fallback ENGI3+ENGI4
         engi11_price = prices.get("ENGI11", np.nan)
-        engi11_shares = shares_series.get("ENGI11", np.nan)
         if pd.notna(engi11_price) and engi11_price > 0:
-            engi_total = engi11_price * engi11_shares
-            engi_calc_source = "ENGI11 price × ENGI11 shares (fixo)"
+            engi_total = engi11_price * shares_series.get("ENGI11", np.nan)
+            engi_calc_source = "ENGI11 price × ENGI11 shares"
         else:
             if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
                 engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
                 engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares"
-                st.info("ENGI11: preço não disponível; usando fallback (ENGI3+ENGI4).")
+                st.info("ENGI11: preço não disponível no batch; usando fallback.")
             else:
-                raise ValueError("Não foi possível calcular o market cap de ENGI.")
+                raise ValueError("Não foi possível calcular market cap de ENGI.")
 
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
-            raise ValueError("Preços/Ações de CPLE3/CPLE6 não encontrados.")
+            raise ValueError("CPLE3/CPLE6 indisponíveis.")
         if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
-            raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
+            raise ValueError("IGTI3/IGTI4 indisponíveis.")
 
         # ====== Tabela final (para XIRR)
-        final_tickers = ["CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","IGTI11","ENGI11"]
+        final_tickers = [
+            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
+            "MULT3","ALOS3","IGTI11","ENGI11",
+        ]
         rows = []
         for t in final_tickers:
             if t == "CPLE6":
@@ -351,24 +406,22 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
             return
 
-        # Header = primeira linha
+        # Normaliza cabeçalho e índice
         df.columns = df.iloc[0]
         df = df.iloc[1:].reset_index(drop=True)
-
-        # 🔧 Normaliza nomes de colunas para garantir match com os tickers
         df.columns = [str(c).strip().upper() for c in df.columns]
 
-        # Garante colunas para todos os tickers finais
+        # Garante colunas
         for t in resultado.index:
             if t not in df.columns:
                 df[t] = pd.NA
 
-        # Injeta CF inicial na primeira linha de dados
+        # Injeta CF inicial na linha 0
         target_row = 0
         today = datetime.now().date()
         for t in resultado.index:
             mc_val = resultado.loc[t, "market_cap"]
-            if pd.isna(mc_val):
+            if pd.isna(mc_val):  # se faltou preço/market cap, não injeta
                 continue
             df.loc[target_row, t] = -abs(mc_val)
 
@@ -378,20 +431,20 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== XIRR ======
         irr_results = {}
-        missing = []
+        no_flow = []
         for t in resultado.index:
             series_cf = df[t].dropna()
             if series_cf.size < 2:
                 irr_results[t] = np.nan
-                missing.append(t)
+                no_flow.append(t)
                 continue
             cashflows = series_cf.values.astype(float)
             n = len(cashflows)
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n)]
             irr_results[t] = compute_xirr(cashflows, dates_list)
 
-        if missing:
-            st.caption("Sem XIRR (faltam fluxos futuros) para: " + ", ".join(missing))
+        if no_flow:
+            st.caption("Sem XIRR (faltam fluxos futuros) para: " + ", ".join(no_flow))
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
@@ -404,7 +457,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Gráfico ======
         if len(ytm_plot) == 0:
-            st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
+            st.warning("Nenhum ticker disponível para o gráfico de IRR.")
         else:
             plot_data = pd.DataFrame({
                 "empresa": ytm_plot.index,
@@ -445,7 +498,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         if "IGTI11" in duration_map.index:
             v = duration_map.loc["IGTI11"]; set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
         if "ENGI11" in duration_map.index:
-            v = duration_map.loc["ENGI11"]
+            v = duration_map.loc["ENGI11"]; 
             if pd.notna(v): set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
@@ -467,7 +520,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
