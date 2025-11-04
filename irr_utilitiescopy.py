@@ -349,7 +349,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     try:
         # ====== Tickers ======
         tickers_for_prices = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
         ]
 
@@ -362,6 +362,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
+            "ENGI11": 2_289_420_000,  # << FIXADO: nº de ações informado
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -370,19 +371,29 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # Consolidações
+        # ====== Consolidações ======
+        # ENGI11: usar preço ENGI11 * ações ENGI11; se preço estiver NaN, fallback antigo (ENGI3 + ENGI4)
+        engi11_price = prices.get("ENGI11", np.nan)
+        engi11_shares = shares_series.get("ENGI11", np.nan)
+        if pd.notna(engi11_price) and engi11_price > 0:
+            engi_total = engi11_price * engi11_shares
+            engi_calc_source = "ENGI11 price × ENGI11 shares (fixo)"
+        else:
+            if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
+                engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
+                engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares (preço ENGI11 indisponível)"
+                st.info("ENGI11: preço não disponível; usando fallback (ENGI3+ENGI4).")
+            else:
+                raise ValueError("Não foi possível calcular o market cap de ENGI (ENGI11 e fallback indisponíveis).")
+
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
         else:
-            raise ValueError("Preços de CPLE3/CPLE6 não encontrados.")
+            raise ValueError("Preços/Ações de CPLE3/CPLE6 não encontrados.")
         if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
-            raise ValueError("Preços de IGTI3/IGTI4 não encontrados.")
-        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
-            engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-        else:
-            raise ValueError("Preços de ENGI3/ENGI4 não encontrados.")
+            raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
         # ====== Tabela final (para XIRR)
         final_tickers = [
@@ -400,12 +411,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
             elif t == "ENGI11":
-                price = np.nan
-                shares = shares_classes["ENGI3"] + shares_classes["ENGI4"]
+                price = prices.get("ENGI11", np.nan)
+                shares = shares_classes["ENGI11"]
                 mc = engi_total
             else:
                 price = prices.get(t, np.nan)
-                shares = shares_classes.get(t, np.nan)
+                shares = shares_series.get(t, np.nan)
                 mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
             rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
 
@@ -495,7 +506,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4 ; ENGI11 -> ENGI3/ENGI4 (se faltarem)
+        # Proxy: IGTI11 -> IGTI3/IGTI4; ENGI11 agora é real, mas pode propagar se quiser
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -504,10 +515,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]
-            set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
+            if pd.notna(v):
+                set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
         # ====== Tabela de preços + Duration (ordenada por Duration) ======
-        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4",
+        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
@@ -528,12 +540,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             unsafe_allow_html=True,
         )
 
+        st.caption(f"ENGI total calculado via: {engi_calc_source}")
+
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
 
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
