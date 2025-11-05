@@ -267,8 +267,7 @@ def main():
 :root{
   --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
   --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
-  --stk-header-bg:#ffffff;           /* Fundo branco no retângulo do topo */
-  --stk-header-fg:#0e314a;           /* Título azul */
+  --stk-header-bg:#ffffff; --stk-header-fg:#0e314a;
 }
 
 html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
@@ -282,9 +281,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 
 /* Header */
 .app-header{
-  background:var(--stk-gold); padding:18px 20px; border-radius:12px;
-  margin:16px 0 16px; box-shadow:0 1px 0 rgba(255,255,255,.05) inset, 0 6px 20px rgba(0,0,0,.15);
-  background:var(--stk-header-bg);   /* antes: var(--stk-gold) */
+  background:var(--stk-header-bg);
   padding:18px 20px; border-radius:12px;
   margin:16px 0 16px;
   box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);
@@ -295,14 +292,12 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 }
 .stk-logo{
   position:absolute; left:16px; top:50%; transform:translateY(-50%);
-  height:44px; width:auto; filter:drop-shadow(0 2px 0 rgba(0,0,0,.12));
   height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));
 }
 .app-header h1{
-  margin:0; color:var(--stk-header-fg); /* antes: #fff */
+  margin:0; color:var(--stk-header-fg);
   font-weight:800; letter-spacing:.4px;
 }
-.app-header h1{margin:0; color:#fff; font-weight:800; letter-spacing:.4px;}
 
 /* Nota */
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px;
@@ -362,7 +357,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # << FIXADO: nº de ações informado
+            "ENGI11": 2_289_420_000,  # nº de unidades informado
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -372,7 +367,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         mc_raw = prices * shares_series
 
         # ====== Consolidações ======
-        # ENGI11: usar preço ENGI11 * ações ENGI11; se preço estiver NaN, fallback antigo (ENGI3 + ENGI4)
         engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         if pd.notna(engi11_price) and engi11_price > 0:
@@ -463,10 +457,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== (NOVO) Remover ELET3 e ELET6 do gráfico de IRR ======
+        # ====== Remover ELET3/ELET6 do gráfico ======
         ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
 
-        # ====== Gráfico ======
+        # ====== Gráfico (piso dinâmico para não clipar ENGI11) ======
         if len(ytm_plot) == 0:
             st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros (ELET3/ELET6 removidos).")
         else:
@@ -475,10 +469,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
-            # Cores personalizadas
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
-            cor_ouro = "rgb(201,140,46)"   # #C98C2E
-            cor_azul = "rgb(16,144,178)"   # #1090B2
+            cor_ouro = "rgb(201,140,46)"
+            cor_azul = "rgb(16,144,178)"
             bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
 
             fig = go.Figure(go.Bar(
@@ -490,14 +483,18 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             ))
             fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
 
-            ymax = max(12.0, float(plot_data["irr"].max()) * 1.10)
+            irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
+            irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
+            ymin = min(4.0, irr_min - 1.0)   # desce até 1 p.p. abaixo do menor IRR; preserva 4% se todos ≥ 4
+            ymax = max(12.0, irr_max * 1.10)
+
             fig.update_layout(
                 bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
                 uniformtext_minsize=10,
                 font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
                 xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
                            showgrid=False, showline=False, zeroline=False),
-                yaxis=dict(title="IRR Real (%)", range=[4.0, ymax], dtick=1,
+                yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1,
                            gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
                 margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
             )
@@ -506,7 +503,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        # Proxy: IGTI11 -> IGTI3/IGTI4; ENGI11 agora é real, mas pode propagar se quiser
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
@@ -518,7 +514,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if pd.notna(v):
                 set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration (ordenada por Duration) ======
+        # ====== Tabela de preços + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -528,7 +524,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
 
-        # Ordena por Duration (numérica) desc; NaN por último
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
 
@@ -548,6 +543,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
