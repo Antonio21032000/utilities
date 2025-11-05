@@ -357,7 +357,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # nº de unidades informado
+            "ENGI11": 2_289_420_000,  # nº de "unidades" informado
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -366,19 +366,28 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # ====== Consolidações ======
+        # ====== Consolidações (ENGI11 robusto) ======
         engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
-        if pd.notna(engi11_price) and engi11_price > 0:
-            engi_total = engi11_price * engi11_shares
+        cap_11 = engi11_price * engi11_shares if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0) else np.nan
+        cap_34 = np.nan
+        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
+            cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
+
+        engi_mismatch = False
+        if pd.notna(cap_11) and pd.notna(cap_34) and cap_34 > 0:
+            diff_ratio = abs(cap_11 - cap_34) / cap_34
+            if diff_ratio > 0.20:
+                engi_mismatch = True
+
+        if pd.notna(cap_34) and (pd.isna(cap_11) or engi_mismatch):
+            engi_total = cap_34
+            engi_calc_source = "fallback robusto: ENGI3×shares + ENGI4×shares (ENGI11 divergente/indisponível)"
+        elif pd.notna(cap_11):
+            engi_total = cap_11
             engi_calc_source = "ENGI11 price × ENGI11 shares (fixo)"
         else:
-            if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
-                engi_total = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-                engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares (preço ENGI11 indisponível)"
-                st.info("ENGI11: preço não disponível; usando fallback (ENGI3+ENGI4).")
-            else:
-                raise ValueError("Não foi possível calcular o market cap de ENGI (ENGI11 e fallback indisponíveis).")
+            raise ValueError("Não foi possível calcular o market cap de ENGI (ENGI11 e fallback indisponíveis).")
 
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
@@ -457,12 +466,22 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== Remover ELET3/ELET6 do gráfico ======
-        ytm_plot = ytm_clean[~ytm_clean.index.isin(["ELET3", "ELET6"])]
+        # ====== Política: esconder ENGI11 se continuar “errada” após mismatch
+        hide_engi_in_plot = False
+        if "ENGI11" in ytm_clean.index:
+            engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
+            if engi_mismatch and engi_irr_pct < 3.0:
+                hide_engi_in_plot = True
 
-        # ====== Gráfico (piso dinâmico para não clipar ENGI11) ======
+        # ====== Remover ELET3/ELET6 e (se necessário) ENGI11 do gráfico ======
+        drop_list = ["ELET3", "ELET6"]
+        if hide_engi_in_plot:
+            drop_list.append("ENGI11")
+        ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
+
+        # ====== Gráfico (piso dinâmico para não clipar) ======
         if len(ytm_plot) == 0:
-            st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros (ELET3/ELET6 removidos).")
+            st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
         else:
             plot_data = pd.DataFrame({
                 "empresa": ytm_plot.index,
@@ -485,7 +504,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
             irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
             irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
-            ymin = min(4.0, irr_min - 1.0)   # desce até 1 p.p. abaixo do menor IRR; preserva 4% se todos ≥ 4
+            ymin = min(4.0, irr_min - 1.0)   # desce 1 p.p. abaixo do mínimo; preserva 4% se todos ≥4
             ymax = max(12.0, irr_max * 1.10)
 
             fig.update_layout(
@@ -535,7 +554,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             unsafe_allow_html=True,
         )
 
-        st.caption(f"ENGI total calculado via: {engi_calc_source}")
+        src_extra = (" • ENGI removida do gráfico por divergência/IRR anômala"
+                     if hide_engi_in_plot else "")
+        st.caption(f"ENGI total calculado via: {engi_calc_source}{src_extra}")
 
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
