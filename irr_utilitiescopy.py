@@ -282,7 +282,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
             "IGTI3": 770_992_429, "IGTI4": 435_368_756,
             "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,  # unidades/BDRs do ENGI11 (valor informado)
+            "ENGI11": 2_289_420_000,
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
@@ -291,27 +291,27 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # ====== Consolidações ======
-        # ENGI11: calcular cap_11 (preço ENGI11 × ações ENGI11) e cap_34 (ENGI3 + ENGI4)
+        # ====== Consolidações (ENGI11 conforme sua exigência) ======
+        THRESH_ENGI_MIN_IRR_PCT = 4.0  # só exibir ENGI11 no gráfico se IRR >= 4%
+
         engi11_price  = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         cap_11 = engi11_price * engi11_shares if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0) else np.nan
+
+        # cap_34 é calculado apenas para eventual logging/diagnóstico, mas NÃO é usado para exibição de IRR da ENGI11
         cap_34 = np.nan
         if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
             cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
 
-        # Escolha do market cap efetivo + flag de método
-        engi_method = None
         if pd.notna(cap_11):
             engi_total = cap_11
-            engi_method = "cap_11"  # Só este método permitirá ENGI11 no gráfico
-            engi_calc_source = "ENGI11 price × ENGI11 shares"
-        elif pd.notna(cap_34):
-            engi_total = cap_34
-            engi_method = "fallback_cap34"
-            engi_calc_source = "fallback: ENGI3×shares + ENGI4×shares (preço ENGI11 indisponível)"
+            engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
+            engi_method_cap11 = True
         else:
-            raise ValueError("Não foi possível calcular o market cap de ENGI.")
+            # sem cap_11 não exibiremos ENGI11 no gráfico
+            engi_total = cap_34 if pd.notna(cap_34) else np.nan
+            engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
+            engi_method_cap11 = False
 
         if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
             cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
@@ -390,10 +390,19 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== Regras de exibição: nunca mostrar ELET3/ELET6; ENGI11 só se cap_11
+        # ====== Regras de exibição no gráfico ======
         drop_list = ["ELET3", "ELET6"]
-        if engi_method != "cap_11":
+
+        # ENGI11 só aparece se foi cap_11 E se IRR >= THRESH_ENGI_MIN_IRR_PCT
+        if ("ENGI11" in ytm_clean.index):
+            engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
+        else:
+            engi_irr_pct = np.nan
+
+        show_engi11 = (engi_method_cap11 is True) and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
+        if not show_engi11:
             drop_list.append("ENGI11")
+
         ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
 
         # ====== Gráfico (piso dinâmico) ======
@@ -461,15 +470,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         # Nota/caption
-        extra = " • ENGI11 exibida (cálculo cap_11)" if engi_method == "cap_11" else " • ENGI11 ocultada (sem cap_11)"
+        engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
         st.markdown("<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>", unsafe_allow_html=True)
-        st.caption(f"ENGI total calculado via: {engi_calc_source}{extra}")
+        st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
 
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
 
 if __name__ == "__main__":
     main()
+
 
 
 
