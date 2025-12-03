@@ -285,7 +285,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "ENGI11": 2_289_420_000,
             "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
-            "ELET3": 2_308_630_000, "EGIE3": 815_928_000,
+            "ELET3": 2_308_630_000, "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
@@ -479,6 +479,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
