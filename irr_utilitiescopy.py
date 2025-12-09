@@ -313,27 +313,20 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
 
-        if {"CPLE3","CPLE6"}.issubset(mc_raw.index):
-            cple_total = mc_raw["CPLE3"] + mc_raw["CPLE6"]
-        else:
-            raise ValueError("Preços/Ações de CPLE3/CPLE6 não encontrados.")
+        # IGTI total (para o ticker sintético IGTI11)
         if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR)
+        # ====== Tabela final (para XIRR) – agora usando CPLE3 diretamente
         final_tickers = [
-            "CPLE6","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
+            "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","IGTI11","ENGI11",
         ]
         rows = []
         for t in final_tickers:
-            if t == "CPLE6":
-                price = prices.get("CPLE6", np.nan)
-                shares = shares_classes["CPLE3"] + shares_classes["CPLE6"]
-                mc = cple_total
-            elif t == "IGTI11":
+            if t == "IGTI11":
                 price = np.nan
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
@@ -414,7 +407,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 "irr": (ytm_plot["irr_aj"] * 100).round(2),
             }).reset_index(drop=True)
 
-            destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE6"}
+            destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE3"}
             cor_ouro = "rgb(201,140,46)"
             cor_azul = "rgb(16,144,178)"
             bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
@@ -479,6 +472,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
