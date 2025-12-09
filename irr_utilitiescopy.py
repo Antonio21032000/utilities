@@ -271,7 +271,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tickers_for_prices = [
             "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-            "AXIA6",
+            "AXIA3","AXIA6",   # AXIA3 incluída aqui
         ]
 
         # ====== Preços ======
@@ -288,7 +288,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
-            "AXIA6": 2_308_630_000,  # qtd de ações da AXIA6
+            "AXIA3": 2_308_630_000,  # nº de ações AXIA3 (fornecido)
+            "AXIA6": 2_308_630_000,  # nº de ações AXIA6 (já existia)
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -330,14 +331,36 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 price = np.nan
                 shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
                 mc = igti_total
+
             elif t == "ENGI11":
                 price = prices.get("ENGI11", np.nan)
                 shares = shares_classes["ENGI11"]
                 mc = engi_total
+
+            elif t == "AXIA6":
+                # AXIA6 mkt cap = AXIA6_price * AXIA6_shares + AXIA3_price * AXIA3_shares
+                price_axia6 = prices.get("AXIA6", np.nan)
+                shares_axia6 = shares_series.get("AXIA6", np.nan)
+                price_axia3 = prices.get("AXIA3", np.nan)
+                shares_axia3 = shares_series.get("AXIA3", np.nan)
+
+                price = price_axia6
+                # opcional: somar as ações das duas classes no "shares" para refletir o total econômico
+                if pd.notna(shares_axia6) and pd.notna(shares_axia3):
+                    shares = shares_axia6 + shares_axia3
+                else:
+                    shares = np.nan
+
+                if all(pd.notna(v) for v in [price_axia6, shares_axia6, price_axia3, shares_axia3]):
+                    mc = price_axia6 * shares_axia6 + price_axia3 * shares_axia3
+                else:
+                    mc = np.nan
+
             else:
                 price = prices.get(t, np.nan)
                 shares = shares_series.get(t, np.nan)
                 mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
+
             rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
 
         resultado = pd.DataFrame(rows).set_index("ticker")
@@ -454,7 +477,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Tabela de preços + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","AXIA6"]
+                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
+                 "AXIA3","AXIA6"]  # AXIA3 incluída na tabela
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
@@ -474,6 +498,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
