@@ -154,7 +154,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
-        if j == dur_idx: continue
+        if j == dur_idx:
+            continue
         s = df.iloc[:, j].dropna(); cnt = 0
         for x in s:
             if isinstance(x, str):
@@ -176,7 +177,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
     t = pd.to_datetime(ts, errors="coerce")
-    if _isna(t): return ""
+    if _isna(t):
+        return ""
     try:
         if t.tzinfo is None:
             t = t.tz_localize("UTC")
@@ -218,7 +220,8 @@ def main():
                        layout="wide", initial_sidebar_state="collapsed")
 
     # ====== THEME / CSS ======
-    st.markdown("""
+    st.markdown(
+        """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{ --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
@@ -248,7 +251,9 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     # Header
     LOGO_PATH = "STKGRAFICO.png"
@@ -261,35 +266,62 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "<div class='app-header'><div class='header-inner'>"
             f"<img class='stk-logo' src='data:image/png;base64,{logo_b64}' alt='STK'/>"
             "<h1>IRR Real</h1>"
-            "</div></div>", unsafe_allow_html=True
+            "</div></div>",
+            unsafe_allow_html=True,
         )
     else:
-        st.markdown("<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>",
+            unsafe_allow_html=True,
+        )
 
     try:
         # ====== Tickers ======
         tickers_for_prices = [
-            "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-            "AXIA3","AXIA6",
+            "CPLE3",
+            "CPLE6",
+            "IGTI3",
+            "IGTI4",
+            "ENGI3",
+            "ENGI4",
+            "ENGI11",
+            "EQTL3",
+            "SBSP3",
+            "NEOE3",
+            "ENEV3",
+            "ELET3",
+            "EGIE3",
+            "MULT3",
+            "ALOS3",
+            "AXIA3",
+            "AXIA6",
         ]
 
         # ====== Preços ======
-        prices_series, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
+        prices_series, meta = fetch_latest_prices_intraday_with_fallback(
+            tickers_for_prices
+        )
         prices = prices_series.astype(float)
 
         # ====== Shares ======
         shares_classes = {
-            "CPLE3": 1_300_347_300, "CPLE6": 1_679_335_290,
-            "IGTI3": 770_992_429, "IGTI4": 435_368_756,
-            "ENGI3": 887_231_247, "ENGI4": 1_402_193_416,
+            "CPLE3": 1_300_347_300,
+            "CPLE6": 1_679_335_290,
+            "IGTI3": 770_992_429,
+            "IGTI4": 435_368_756,
+            "ENGI3": 887_231_247,
+            "ENGI4": 1_402_193_416,
             "ENGI11": 2_289_420_000,
-            "EQTL3": 1_255_510_000, "SBSP3": 683_510_000,
-            "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
-            "ELET3": 2_308_630_000, "EGIE3": 1_142_300_000,
-            "MULT3": 513_164_000, "ALOS3": 542_937_000,
+            "EQTL3": 1_255_510_000,
+            "SBSP3": 683_510_000,
+            "NEOE3": 1_213_800_000,
+            "ENEV3": 1_936_970_000,
+            "ELET3": 2_308_630_000,
+            "EGIE3": 1_142_300_000,
+            "MULT3": 513_164_000,
+            "ALOS3": 542_937_000,
             "AXIA3": 2_028_500_000,  # atualizado
-            "AXIA6":   279_000_000,  # atualizado
+            "AXIA6": 279_000_000,  # atualizado
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -297,12 +329,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Consolidações (ENGI11) ======
         THRESH_ENGI_MIN_IRR_PCT = 4.0  # só exibir ENGI11 no gráfico se IRR >= 4%
 
-        engi11_price  = prices.get("ENGI11", np.nan)
+        engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
-        cap_11 = engi11_price * engi11_shares if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0) else np.nan
+        cap_11 = (
+            engi11_price * engi11_shares
+            if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0)
+            else np.nan
+        )
 
         cap_34 = np.nan
-        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
+        if {"ENGI3", "ENGI4"}.issubset(mc_raw.index):
             cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
 
         if pd.notna(cap_11):
@@ -315,15 +351,25 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_method_cap11 = False
 
         # IGTI total (para ticker sintético IGTI11)
-        if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
+        if {"IGTI3", "IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
         # ====== Tabela final (para XIRR) – CPLE3 direto + AXIA6
         final_tickers = [
-            "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
+            "CPLE3",
+            "EQTL3",
+            "SBSP3",
+            "NEOE3",
+            "ENEV3",
+            "ELET3",
+            "EGIE3",
+            "MULT3",
+            "ALOS3",
+            "AXIA6",
+            "IGTI11",
+            "ENGI11",
         ]
         rows = []
         for t in final_tickers:
@@ -350,7 +396,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 else:
                     shares = np.nan
 
-                if all(pd.notna(v) for v in [price_axia6, shares_axia6, price_axia3, shares_axia3]):
+                if all(
+                    pd.notna(v)
+                    for v in [price_axia6, shares_axia6, price_axia3, shares_axia3]
+                ):
                     mc = price_axia6 * shares_axia6 + price_axia3 * shares_axia3
                 else:
                     mc = np.nan
@@ -360,7 +409,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_series.get(t, np.nan)
                 mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
 
-            rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
+            rows.append(
+                {"ticker": t, "price": price, "shares": shares, "market_cap": mc}
+            )
 
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
@@ -372,7 +423,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
             return
 
-        df.columns = df.iloc[0]; df = df.iloc[1:]
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
 
         for t in resultado.index:
             if t not in df.columns:
@@ -395,14 +447,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 continue
             cashflows = series_cf.values.astype(float).copy()
             n_periods = len(cashflows)
-            dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
+            dates_list = [today] + [
+                date(today.year + j - 1, 12, 31) for j in range(1, n_periods)
+            ]
             irr_results[t] = compute_xirr(cashflows, dates_list)
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate + AXIA6)
-        for t in ["MULT3","ALOS3","IGTI11","AXIA6"]:
+        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
+        for t in ["MULT3", "ALOS3", "IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
 
@@ -411,12 +465,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Regras de exibição no gráfico ======
         drop_list = ["ELET3", "ELET6"]
 
-        if ("ENGI11" in ytm_clean.index):
+        if "ENGI11" in ytm_clean.index:
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
         else:
             engi_irr_pct = np.nan
 
-        show_engi11 = (engi_method_cap11 is True) and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
+        show_engi11 = (
+            engi_method_cap11 is True
+            and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
+        )
         if not show_engi11:
             drop_list.append("ENGI11")
 
@@ -426,23 +483,34 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         if len(ytm_plot) == 0:
             st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
         else:
-            plot_data = pd.DataFrame({
-                "empresa": ytm_plot.index,
-                "irr": (ytm_plot["irr_aj"] * 100).round(2),
-            }).reset_index(drop=True)
+            plot_data = pd.DataFrame(
+                {
+                    "empresa": ytm_plot.index,
+                    "irr": (ytm_plot["irr_aj"] * 100).round(2),
+                }
+            ).reset_index(drop=True)
 
             destaque = {"EQTL3", "EGIE3", "IGTI11", "SBSP3", "CPLE3"}
             cor_ouro = "rgb(201,140,46)"
             cor_azul = "rgb(16,144,178)"
-            bar_colors = [cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]]
+            bar_colors = [
+                cor_ouro if e in destaque else cor_azul for e in plot_data["empresa"]
+            ]
 
-            fig = go.Figure(go.Bar(
-                x=plot_data["empresa"], y=plot_data["irr"],
-                text=[f"{v:.2f}%" for v in plot_data["irr"]],
-                marker=dict(color=bar_colors, line=dict(width=0)),
-                hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
-            ))
-            fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
+            fig = go.Figure(
+                go.Bar(
+                    x=plot_data["empresa"],
+                    y=plot_data["irr"],
+                    text=[f"{v:.2f}%" for v in plot_data["irr"]],
+                    marker=dict(color=bar_colors, line=dict(width=0)),
+                    hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
+                )
+            )
+            fig.update_traces(
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(color="white", size=14),
+            )
 
             irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
             irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
@@ -450,53 +518,101 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             ymax = max(12.0, irr_max * 1.10)
 
             fig.update_layout(
-                bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
+                bargap=0.12,
+                plot_bgcolor="#0e314a",
+                paper_bgcolor="#0e314a",
                 uniformtext_minsize=10,
-                font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
-                xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
-                           showgrid=False, showline=False, zeroline=False),
-                yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1,
-                           gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
-                margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
+                font=dict(
+                    family="Inter, system-ui, sans-serif", color="white", size=14
+                ),
+                xaxis=dict(
+                    title="Empresas",
+                    tickfont=dict(size=12, color="white"),
+                    showgrid=False,
+                    showline=False,
+                    zeroline=False,
+                ),
+                yaxis=dict(
+                    title="IRR Real (%)",
+                    range=[ymin, ymax],
+                    dtick=1,
+                    gridcolor="rgba(255,255,255,.12)",
+                    zeroline=False,
+                    tickfont=dict(color="white"),
+                ),
+                margin=dict(l=10, r=10, t=6, b=62),
+                showlegend=False,
+                height=560,
             )
             st.plotly_chart(fig, use_container_width=True)
 
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
+
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
+
         if "IGTI11" in duration_map.index:
             v = duration_map.loc["IGTI11"]
-            set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
+            set_if_missing("IGTI3", v)
+            set_if_missing("IGTI4", v)
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]
             if pd.notna(v):
-                set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
+                set_if_missing("ENGI3", v)
+                set_if_missing("ENGI4", v)
 
         # ====== Tabela de preços + Duration ======
-        order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-                 "AXIA3","AXIA6"]
+        order = [
+            "CPLE3",
+            "CPLE6",
+            "IGTI3",
+            "IGTI4",
+            "ENGI3",
+            "ENGI4",
+            "ENGI11",
+            "EQTL3",
+            "SBSP3",
+            "NEOE3",
+            "ENEV3",
+            "ELET3",
+            "EGIE3",
+            "MULT3",
+            "ALOS3",
+            "AXIA3",
+            "AXIA6",
+        ]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
-        tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
+        tbl = tbl.sort_values(
+            by="__dur_num", ascending=False, na_position="last"
+        ).drop(columns="__dur_num")
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         # Nota/caption
-        engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
-        st.markdown("<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>", unsafe_allow_html=True)
+        engi_status = (
+            "ENGI11 exibida (cap_11 e IRR ≥ 4%)"
+            if show_engi11
+            else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
+        )
+        st.markdown(
+            "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
+            unsafe_allow_html=True,
+        )
         st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
 
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
 
+
 if __name__ == "__main__":
     main()
+
 
 
 
