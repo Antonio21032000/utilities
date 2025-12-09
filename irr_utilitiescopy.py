@@ -286,8 +286,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Shares ======
         shares_classes = {
-            "CPLE3": 1_300_347_300,
-            "CPLE6": 1_679_335_290,
+            "CPLE3": 1_300_300_000,      # atualizado
+            "CPLE6": 1_679_300_000,      # atualizado
             "IGTI3": 770_992_429,
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
@@ -337,7 +337,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) – CPLE3 direto + AXIA6
+        # ====== Tabela final (para XIRR) – Copel via CPLE3 consolidado + AXIA6
         final_tickers = [
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
@@ -369,6 +369,24 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
                 if all(pd.notna(v) for v in [price_axia6, shares_axia6, price_axia3, shares_axia3]):
                     mc = price_axia6 * shares_axia6 + price_axia3 * shares_axia3
+                else:
+                    mc = np.nan
+
+            elif t == "CPLE3":
+                # Copel consolidada: CPLE3 + CPLE6
+                price_cple3 = prices.get("CPLE3", np.nan)
+                price_cple6 = prices.get("CPLE6", np.nan)
+                shares_cple3 = shares_series.get("CPLE3", np.nan)
+                shares_cple6 = shares_series.get("CPLE6", np.nan)
+
+                price = price_cple3
+                if pd.notna(shares_cple3) and pd.notna(shares_cple6):
+                    shares = shares_cple3 + shares_cple6
+                else:
+                    shares = np.nan
+
+                if all(pd.notna(v) for v in [price_cple3, shares_cple3, price_cple6, shares_cple6]):
+                    mc = price_cple3 * shares_cple3 + price_cple6 * shares_cple6
                 else:
                     mc = np.nan
 
@@ -449,7 +467,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             }).reset_index(drop=True)
 
             cor_ouro = "rgb(201,140,46)"
-            # todas as barras no mesmo laranja
             bar_colors = [cor_ouro for _ in plot_data["empresa"]]
 
             fig = go.Figure(go.Bar(
@@ -513,6 +530,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
