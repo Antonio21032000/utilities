@@ -285,16 +285,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices = prices_series.astype(float)
 
         # ====== Shares ======
+        # Aqui os números de ações individuais por classe (para tabela, etc.)
         shares_classes = {
-            # CPLE – usar números que você passou
-            "CPLE3": 1_300_300_000,
-            "CPLE6": 1_679_300_000,
-            # Demais
+            "CPLE3": 1_300_300_000,   # atualizado
+            "CPLE6": 1_679_300_000,   # atualizado
             "IGTI3": 770_992_429,
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
             "ENGI4": 1_402_193_416,
-            "ENGI11": 502_800_000,      # nº de ENGI11
+            "ENGI11": 502_800_000,      # número de ações da ENGI11
             "EQTL3": 1_255_510_000,
             "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000,
@@ -303,8 +302,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
-            "AXIA3": 2_028_500_000,
-            "AXIA6":   279_000_000,
+            "AXIA3": 2_028_500_000,     # atualizado
+            "AXIA6":   279_000_000,     # atualizado
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -339,7 +338,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) – CPLE3 (econômico) + AXIA6
+        # ====== Tabela final (para XIRR) – CPLE3 sintética + AXIA6, etc.
         final_tickers = [
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
@@ -375,20 +374,21 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                     mc = np.nan
 
             elif t == "CPLE3":
-                # >>> NOVO: market cap econômico de CPLE3 (ON + PN)
-                price_c3 = prices.get("CPLE3", np.nan)
-                price_c6 = prices.get("CPLE6", np.nan)
-                shares_c3 = shares_series.get("CPLE3", np.nan)
-                shares_c6 = shares_series.get("CPLE6", np.nan)
+                # CPLE3 mkt cap sintético:
+                # MC_CPLE3 = (1.300.300.000 × Preço_CPLE3) + (1.679.300.000 × Preço_CPLE6)
+                price_cple3 = prices.get("CPLE3", np.nan)
+                price_cple6 = prices.get("CPLE6", np.nan)
+                shares_cple3 = 1_300_300_000
+                shares_cple6 = 1_679_300_000
 
-                price = price_c3
-                if pd.notna(shares_c3) and pd.notna(shares_c6):
-                    shares = shares_c3 + shares_c6
+                price = price_cple3
+                if pd.notna(shares_cple3) and pd.notna(shares_cple6):
+                    shares = shares_cple3 + shares_cple6
                 else:
                     shares = np.nan
 
-                if all(pd.notna(v) for v in [price_c3, shares_c3, price_c6, shares_c6]):
-                    mc = price_c3 * shares_c3 + price_c6 * shares_c6
+                if all(pd.notna(v) for v in [price_cple3, price_cple6]):
+                    mc = shares_cple3 * price_cple3 + shares_cple6 * price_cple6
                 else:
                     mc = np.nan
 
@@ -438,7 +438,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
+        # Ajuste para IRR real (shopping / real estate, sem AXIA6 e sem CPLE3)
         for t in ["MULT3","ALOS3","IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
@@ -446,7 +446,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
         # ====== Regras de exibição no gráfico ======
-        drop_list = ["ELET3", "ELET6"]
+        drop_list = ["ELET3", "ELET6"]  # CPLE3 NÃO entra aqui
 
         if "ENGI11" in ytm_clean.index:
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
