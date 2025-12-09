@@ -101,25 +101,31 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         intraday = intraday.ffill()
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
-        intraday = pd.DataFrame(); ts1m = None
+        intraday = pd.DataFrame()
+        ts1m = None
 
     # Daily close
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
     except Exception:
-        daily = pd.DataFrame(); tsd = None
+        daily = pd.DataFrame()
+        tsd = None
 
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
         if ts1m is not None and tsa in getattr(intraday, "columns", []):
             v = intraday.loc[ts1m, tsa]
             if pd.notna(v):
-                val = float(v); used_ts = ts1m; used_src = "intraday 1m"
+                val = float(v)
+                used_ts = ts1m
+                used_src = "intraday 1m"
         if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
             v = daily.iloc[-1][tsa]
             if pd.notna(v):
-                val = float(v); used_ts = tsd; used_src = "daily close"
+                val = float(v)
+                used_ts = tsd
+                used_src = "daily close"
         prices[t] = val
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
@@ -138,7 +144,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i; break
+            header_row = i
+            break
     if header_row is None:
         return pd.Series(dtype="float64")
 
@@ -146,17 +153,19 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     dur_idx = None
     for j, v in enumerate(header_vals):
         if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j; break
+            dur_idx = j
+            break
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
-    df = raw.iloc[header_row + 1:].reset_index(drop=True)
+    df = raw.iloc[header_row + 1 :].reset_index(drop=True)
 
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
         if j == dur_idx:
             continue
-        s = df.iloc[:, j].dropna(); cnt = 0
+        s = df.iloc[:, j].dropna()
+        cnt = 0
         for x in s:
             if isinstance(x, str):
                 token = x.strip().upper()
@@ -216,8 +225,12 @@ def build_price_table_html(df: pd.DataFrame) -> str:
 
 # ---------- App ----------
 def main():
-    st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
-                       layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(
+        page_title="IRR Real Dashboard",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
 
     # ====== THEME / CSS ======
     st.markdown(
@@ -311,7 +324,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
             "ENGI4": 1_402_193_416,
-            "ENGI11": 2_289_420_000,
+            "ENGI11": 502_800_000,  # <<< novo número de ações ENGI11
             "EQTL3": 1_255_510_000,
             "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000,
@@ -321,14 +334,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
             "AXIA3": 2_028_500_000,  # atualizado
-            "AXIA6": 279_000_000,  # atualizado
+            "AXIA6": 279_000_000,    # atualizado
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
         # ====== Consolidações (ENGI11) ======
-        THRESH_ENGI_MIN_IRR_PCT = 4.0  # só exibir ENGI11 no gráfico se IRR >= 4%
-
         engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         cap_11 = (
@@ -356,7 +367,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) – CPLE3 direto + AXIA6
+        # ====== Tabela final (para XIRR)
         final_tickers = [
             "CPLE3",
             "EQTL3",
@@ -470,10 +481,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             engi_irr_pct = np.nan
 
-        show_engi11 = (
-            engi_method_cap11 is True
-            and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
-        )
+        # Agora ENGI11 aparece sempre que tivermos cap_11 (preço direto) e IRR calculada
+        show_engi11 = (engi_method_cap11 is True) and pd.notna(engi_irr_pct)
         if not show_engi11:
             drop_list.append("ENGI11")
 
@@ -596,9 +605,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # Nota/caption
         engi_status = (
-            "ENGI11 exibida (cap_11 e IRR ≥ 4%)"
+            "ENGI11 exibida (cap_11 disponível)"
             if show_engi11
-            else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
+            else "ENGI11 ocultada (sem cap_11 – fallback)"
         )
         st.markdown(
             "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
