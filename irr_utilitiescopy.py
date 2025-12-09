@@ -286,13 +286,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Shares ======
         shares_classes = {
-            "CPLE3": 1_300_300_000,      # atualizado
-            "CPLE6": 1_679_300_000,      # atualizado
+            # CPLE – usar números que você passou
+            "CPLE3": 1_300_300_000,
+            "CPLE6": 1_679_300_000,
+            # Demais
             "IGTI3": 770_992_429,
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
             "ENGI4": 1_402_193_416,
-            "ENGI11": 502_800_000,      # número de ações da ENGI11
+            "ENGI11": 502_800_000,      # nº de ENGI11
             "EQTL3": 1_255_510_000,
             "SBSP3": 683_510_000,
             "NEOE3": 1_213_800_000,
@@ -301,8 +303,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
-            "AXIA3": 2_028_500_000,     # atualizado
-            "AXIA6":   279_000_000,     # atualizado
+            "AXIA3": 2_028_500_000,
+            "AXIA6":   279_000_000,
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -337,7 +339,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) – Copel via CPLE3 consolidado + AXIA6
+        # ====== Tabela final (para XIRR) – CPLE3 (econômico) + AXIA6
         final_tickers = [
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
@@ -373,20 +375,20 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                     mc = np.nan
 
             elif t == "CPLE3":
-                # Copel consolidada: CPLE3 + CPLE6
-                price_cple3 = prices.get("CPLE3", np.nan)
-                price_cple6 = prices.get("CPLE6", np.nan)
-                shares_cple3 = shares_series.get("CPLE3", np.nan)
-                shares_cple6 = shares_series.get("CPLE6", np.nan)
+                # >>> NOVO: market cap econômico de CPLE3 (ON + PN)
+                price_c3 = prices.get("CPLE3", np.nan)
+                price_c6 = prices.get("CPLE6", np.nan)
+                shares_c3 = shares_series.get("CPLE3", np.nan)
+                shares_c6 = shares_series.get("CPLE6", np.nan)
 
-                price = price_cple3
-                if pd.notna(shares_cple3) and pd.notna(shares_cple6):
-                    shares = shares_cple3 + shares_cple6
+                price = price_c3
+                if pd.notna(shares_c3) and pd.notna(shares_c6):
+                    shares = shares_c3 + shares_c6
                 else:
                     shares = np.nan
 
-                if all(pd.notna(v) for v in [price_cple3, shares_cple3, price_cple6, shares_cple6]):
-                    mc = price_cple3 * shares_cple3 + price_cple6 * shares_cple6
+                if all(pd.notna(v) for v in [price_c3, shares_c3, price_c6, shares_c6]):
+                    mc = price_c3 * shares_c3 + price_c6 * shares_c6
                 else:
                     mc = np.nan
 
@@ -530,9 +532,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 
