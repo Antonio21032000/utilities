@@ -271,6 +271,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tickers_for_prices = [
             "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
+            "AXIA6",
         ]
 
         # ====== Preços ======
@@ -287,18 +288,18 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
+            "AXIA6": 2_308_630_000,  # qtd de ações da AXIA6
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # ====== Consolidações (ENGI11 conforme sua exigência) ======
+        # ====== Consolidações (ENGI11) ======
         THRESH_ENGI_MIN_IRR_PCT = 4.0  # só exibir ENGI11 no gráfico se IRR >= 4%
 
         engi11_price  = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         cap_11 = engi11_price * engi11_shares if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0) else np.nan
 
-        # cap_34 é calculado apenas para eventual logging/diagnóstico, mas NÃO é usado para exibição de IRR da ENGI11
         cap_34 = np.nan
         if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
             cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
@@ -308,21 +309,20 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
             engi_method_cap11 = True
         else:
-            # sem cap_11 não exibiremos ENGI11 no gráfico
             engi_total = cap_34 if pd.notna(cap_34) else np.nan
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
 
-        # IGTI total (para o ticker sintético IGTI11)
+        # IGTI total (para ticker sintético IGTI11)
         if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) – agora usando CPLE3 diretamente
+        # ====== Tabela final (para XIRR) – CPLE3 direto + AXIA6
         final_tickers = [
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","IGTI11","ENGI11",
+            "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
         ]
         rows = []
         for t in final_tickers:
@@ -378,15 +378,17 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
-        for t in ["MULT3","ALOS3","IGTI11"]:
+
+        # Ajuste para IRR real (shopping / real estate + AXIA6)
+        for t in ["MULT3","ALOS3","IGTI11","AXIA6"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
+
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
         # ====== Regras de exibição no gráfico ======
         drop_list = ["ELET3", "ELET6"]
 
-        # ENGI11 só aparece se foi cap_11 E se IRR >= THRESH_ENGI_MIN_IRR_PCT
         if ("ENGI11" in ytm_clean.index):
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
         else:
@@ -452,7 +454,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Tabela de preços + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3"]
+                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3","AXIA6"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
@@ -472,6 +474,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
