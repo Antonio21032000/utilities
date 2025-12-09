@@ -271,7 +271,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tickers_for_prices = [
             "CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-            "AXIA3","AXIA6",   # AXIA3 incluída aqui
+            "AXIA3","AXIA6",
         ]
 
         # ====== Preços ======
@@ -288,8 +288,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "NEOE3": 1_213_800_000, "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000, "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000, "ALOS3": 542_937_000,
-            "AXIA3": 2_308_630_000,  # nº de ações AXIA3 (fornecido)
-            "AXIA6": 2_308_630_000,  # nº de ações AXIA6 (já existia)
+            "AXIA3": 2_028_500_000,  # atualizado
+            "AXIA6":   279_000_000,  # atualizado
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -345,7 +345,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares_axia3 = shares_series.get("AXIA3", np.nan)
 
                 price = price_axia6
-                # opcional: somar as ações das duas classes no "shares" para refletir o total econômico
                 if pd.notna(shares_axia6) and pd.notna(shares_axia3):
                     shares = shares_axia6 + shares_axia3
                 else:
@@ -478,7 +477,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Tabela de preços + Duration ======
         order = ["CPLE3","CPLE6","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
                  "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-                 "AXIA3","AXIA6"]  # AXIA3 incluída na tabela
+                 "AXIA3","AXIA6"]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
@@ -498,6 +497,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
