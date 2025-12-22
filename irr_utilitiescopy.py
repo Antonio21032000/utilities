@@ -273,11 +273,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         )
 
     try:
-        # ====== Tickers (CPLE5 no lugar de CPLE6) ======
+        # ====== Tickers (CPLE5 no lugar de CPLE6, e AXIA7 incluída) ======
         tickers_for_prices = [
             "CPLE3","CPLE5","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-            "AXIA3","AXIA6",
+            "AXIA3","AXIA6","AXIA7",
         ]
 
         # ====== Preços ======
@@ -287,7 +287,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Shares ======
         shares_classes = {
             "CPLE3": 1_300_300_000,     # nº ações ON
-            "CPLE5": 1_682_500_000,     # nº ações PN (antiga 6)
+            "CPLE5": 1_682_500_000,     # nº ações PN
             "IGTI3": 770_992_429,
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
@@ -302,7 +302,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
             "AXIA3": 2_028_500_000,
-            "AXIA6": 279_000_000,
+            "AXIA6":   279_000_000,
+            "AXIA7":   606_750_000,     # nova classe
         }
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
@@ -355,32 +356,44 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 mc = engi_total
 
             elif t == "AXIA6":
-                # AXIA6 mkt cap = AXIA6_price * AXIA6_shares + AXIA3_price * AXIA3_shares
+                # MC_AXIA6 = AXIA6 + AXIA3 + AXIA7
                 price_axia6 = prices.get("AXIA6", np.nan)
                 shares_axia6 = shares_series.get("AXIA6", np.nan)
                 price_axia3 = prices.get("AXIA3", np.nan)
                 shares_axia3 = shares_series.get("AXIA3", np.nan)
+                price_axia7 = prices.get("AXIA7", np.nan)
+                shares_axia7 = shares_series.get("AXIA7", np.nan)
 
+                # preço exibido = AXIA6
                 price = price_axia6
-                if pd.notna(shares_axia6) and pd.notna(shares_axia3):
-                    shares = shares_axia6 + shares_axia3
-                else:
-                    shares = np.nan
 
-                if all(pd.notna(v) for v in [price_axia6, shares_axia6, price_axia3, shares_axia3]):
-                    mc = price_axia6 * shares_axia6 + price_axia3 * shares_axia3
-                else:
-                    mc = np.nan
+                # ações exibidas = soma das três classes (econômico)
+                shares_parts = [
+                    s for s in [shares_axia6, shares_axia3, shares_axia7]
+                    if pd.notna(s)
+                ]
+                shares = sum(shares_parts) if shares_parts else np.nan
+
+                # market cap = soma de preço * quantidade de cada classe
+                mc_parts = []
+                if pd.notna(price_axia6) and pd.notna(shares_axia6):
+                    mc_parts.append(price_axia6 * shares_axia6)
+                if pd.notna(price_axia3) and pd.notna(shares_axia3):
+                    mc_parts.append(price_axia3 * shares_axia3)
+                if pd.notna(price_axia7) and pd.notna(shares_axia7):
+                    mc_parts.append(price_axia7 * shares_axia7)
+
+                mc = sum(mc_parts) if mc_parts else np.nan
 
             elif t == "CPLE3":
-                # *** AQUI está a fórmula que você pediu ***
+                # MC_CPLE3 = CPLE3 + CPLE5
                 price_cple3 = prices.get("CPLE3", np.nan)
                 price_cple5 = prices.get("CPLE5", np.nan)
                 shares_cple3 = shares_classes["CPLE3"]
                 shares_cple5 = shares_classes["CPLE5"]
 
-                price = price_cple3                     # preço exibido
-                shares = shares_cple3 + shares_cple5    # total econômico
+                price = price_cple3
+                shares = shares_cple3 + shares_cple5
 
                 parts = []
                 if pd.notna(price_cple3):
@@ -444,7 +457,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
         # ====== Regras de exibição no gráfico ======
-        drop_list = ["ELET3", "ELET6"]  # ELET6 aqui é irrelevante, mas ok
+        drop_list = ["ELET3", "ELET6"]  # ELET6 irrelevante, mas mantido
 
         if "ENGI11" in ytm_clean.index:
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
@@ -508,9 +521,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
         # ====== Tabela de preços + Duration ======
-        order = ["CPLE3","CPLE5","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-                 "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
-                 "AXIA3","AXIA6"]
+        order = [
+            "CPLE3","CPLE5","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
+            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3","MULT3","ALOS3",
+            "AXIA3","AXIA6","AXIA7"
+        ]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
         tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt)
@@ -530,6 +545,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
