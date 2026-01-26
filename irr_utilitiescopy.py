@@ -1,10 +1,9 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-from datetime import datetime, date
+from datetime import datetime, date, time as dtime
 import base64, os, re
 from pathlib import Path
 import time, random
@@ -104,13 +103,15 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 # ---------- Prices ----------
-def fetch_latest_prices_intraday_with_fallback(tickers):
+def _within_b3_session(now_local: datetime) -> bool:
+    # Heurística simples: B3 ~ 10:00–18:00 BRT (não perfeito, mas evita intraday fora de hora)
+    t = now_local.time()
+    return dtime(10, 5) <= t <= dtime(18, 5)
+
+@st.cache_data(ttl=60, show_spinner=False)
+def fetch_latest_prices_intraday_with_fallback_cached(tickers, allow_intraday: bool):
     """
-    Robusto p/ Streamlit Cloud + Yahoo rate-limit:
-    - threads=False (evita Connection pool full e derrubar Yahoo)
-    - chunk de tickers (menos pancada)
-    - retries com backoff (quando Yahoo devolve HTML/vazio => JSONDecodeError)
-    - MultiIndex ok
+    Cacheada (evita rerun bater Yahoo toda hora).
     """
     tickers_sa = [f"{t}.SA" for t in tickers]
 
@@ -123,7 +124,7 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
             return pd.DataFrame()
 
         try:
-            close = raw["Close"]  # funciona com MultiIndex e simples
+            close = raw["Close"]
         except Exception:
             if isinstance(raw.columns, pd.MultiIndex):
                 try:
@@ -137,8 +138,11 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
             close = close.to_frame()
         return close
 
-    def _download_close_chunk(tickers_chunk, period, interval=None, tries=4):
+    def _download_close_chunk(tickers_chunk, period, interval=None, tries=2, timeout_total_s=12, start_ts=None):
+        # tries menor para não travar app
         for k in range(tries):
+            if start_ts is not None and (time.time() - start_ts) > timeout_total_s:
+                return pd.DataFrame()
             try:
                 raw = yf.download(
                     tickers_chunk,
@@ -147,21 +151,31 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
                     progress=False,
                     group_by="column",
                     auto_adjust=False,
-                    threads=False,  # CRÍTICO
+                    threads=False,
                 )
                 close = _extract_close(raw).ffill()
                 if close.empty or close.dropna(how="all").empty:
                     raise RuntimeError("Yahoo returned empty/non-JSON data")
                 return close
             except Exception:
-                time.sleep((0.7 * (2 ** k)) + random.random() * 0.3)
+                time.sleep((0.4 * (2 ** k)) + random.random() * 0.2)
         return pd.DataFrame()
 
-    def _download_close_all(tickers_all, period, interval=None, chunk_size=6):
+    def _download_close_all(tickers_all, period, interval=None, chunk_size=6, timeout_total_s=12):
+        start_ts = time.time()
         closes = []
         for i in range(0, len(tickers_all), chunk_size):
+            if (time.time() - start_ts) > timeout_total_s:
+                break
             chunk = tickers_all[i:i + chunk_size]
-            c = _download_close_chunk(chunk, period=period, interval=interval)
+            c = _download_close_chunk(
+                chunk,
+                period=period,
+                interval=interval,
+                tries=2,
+                timeout_total_s=timeout_total_s,
+                start_ts=start_ts,
+            )
             if not c.empty:
                 closes.append(c)
         if not closes:
@@ -170,26 +184,28 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         out = out.loc[:, ~out.columns.duplicated()]
         return out
 
-    # Intraday 1m
-    intraday = _download_close_all(tickers_sa, period="1d", interval="1m", chunk_size=4)
-    valid_i = intraday.dropna(how="all")
-    ts1m = valid_i.index.max() if not valid_i.empty else None
-    if ts1m is not None and pd.isna(ts1m):
-        ts1m = None
-
-    # Daily close
-    daily = _download_close_all(tickers_sa, period="5d", interval=None, chunk_size=6)
+    # Daily close (sempre tenta)
+    daily = _download_close_all(tickers_sa, period="5d", interval=None, chunk_size=6, timeout_total_s=12)
     valid_d = daily.dropna(how="all")
     tsd = valid_d.index.max() if not valid_d.empty else None
     if tsd is not None and pd.isna(tsd):
         tsd = None
 
-    prices, source, ts_used = {}, {}, {}
+    # Intraday (só se allow_intraday=True)
+    intraday = pd.DataFrame()
+    ts1m = None
+    if allow_intraday:
+        intraday = _download_close_all(tickers_sa, period="1d", interval="1m", chunk_size=4, timeout_total_s=12)
+        valid_i = intraday.dropna(how="all")
+        ts1m = valid_i.index.max() if not valid_i.empty else None
+        if ts1m is not None and pd.isna(ts1m):
+            ts1m = None
 
+    prices, source, ts_used = {}, {}, {}
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
 
-        if (ts1m is not None) and (not intraday.empty) and (tsa in intraday.columns) and (ts1m in intraday.index):
+        if allow_intraday and (ts1m is not None) and (not intraday.empty) and (tsa in intraday.columns) and (ts1m in intraday.index):
             v = intraday.at[ts1m, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = ts1m; used_src = "intraday 1m"
@@ -206,6 +222,12 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     price_series = pd.Series(prices, name="preco")
     meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
     return price_series, meta
+
+def fetch_latest_prices_intraday_with_fallback(tickers):
+    # decide intraday por horário local (BRT)
+    now = datetime.now()
+    allow_intraday = _within_b3_session(now)
+    return fetch_latest_prices_intraday_with_fallback_cached(tuple(tickers), allow_intraday)
 
 # ---------- Duration loader ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
@@ -351,7 +373,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         )
 
     try:
-        # ====== Tickers ======
         tickers_for_prices = [
             "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
@@ -359,8 +380,16 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ]
 
         # ====== Preços ======
-        prices_series, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
+        with st.spinner("Buscando preços (Yahoo Finance)…"):
+            prices_series, meta = fetch_latest_prices_intraday_with_fallback(tickers_for_prices)
         prices = prices_series.astype(float)
+
+        # Se Yahoo bloquear (tudo NaN), não deixa UI “sumir”
+        if prices.isna().all():
+            st.warning(
+                "Não consegui baixar preços do Yahoo (provável bloqueio/rate-limit no Streamlit Cloud). "
+                "Tente novamente mais tarde ou rode o app fora do Streamlit Community Cloud."
+            )
 
         # ====== Shares ======
         shares_classes = {
@@ -385,7 +414,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # ====== Consolidações (ENGI11) ======
         THRESH_ENGI_MIN_IRR_PCT = 4.0
 
         engi11_price  = prices.get("ENGI11", np.nan)
@@ -409,13 +437,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
 
-        # IGTI total (ticker sintético IGTI11)
         if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
             igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
         else:
             raise ValueError("Preços/Ações de IGTI3/IGTI4 não encontrados.")
 
-        # ====== Tabela final (para XIRR) ======
         final_tickers = [
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
@@ -467,7 +493,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado = pd.DataFrame(rows).set_index("ticker")
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
-        # ====== Excel dos fluxos ======
         df = pd.read_excel("irrdash3.xlsx")
         df.columns = df.iloc[0]
         df = df.iloc[1:]
@@ -484,7 +509,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
 
-        # ====== XIRR ======
         irr_results = {}
         for t in resultado.index:
             series_cf = df[t].dropna()
@@ -596,11 +620,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
-
-
-
-
 
 
 
