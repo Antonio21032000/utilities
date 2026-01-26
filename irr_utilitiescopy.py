@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -5,12 +6,22 @@ import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date
 import base64, os, re
+from pathlib import Path
+import time, random
 
 # ---------- Finance helpers ----------
 try:
     import numpy_financial as npf
 except Exception:
     npf = None
+
+# ---------- yfinance tz cache (Streamlit Cloud safe) ----------
+try:
+    cache_dir = Path("/tmp/py-yfinance")
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    yf.set_tz_cache_location(str(cache_dir))
+except Exception:
+    pass
 
 # --- Helpers seguros contra NA/NaT ---
 def _isna(x):
@@ -95,83 +106,86 @@ def cap_to_first_digits_mln(value, digits=6):
 # ---------- Prices ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
     """
-    Robusto contra:
-      - MultiIndex do yfinance.download() (múltiplos tickers)
-      - retorno vazio (sem candles) => evita ts=NaT
-      - single ticker (Series) vs multi ticker (DataFrame)
+    Robusto p/ Streamlit Cloud + Yahoo rate-limit:
+    - threads=False (evita Connection pool full e derrubar Yahoo)
+    - chunk de tickers (menos pancada)
+    - retries com backoff (quando Yahoo devolve HTML/vazio => JSONDecodeError)
+    - MultiIndex ok
     """
     tickers_sa = [f"{t}.SA" for t in tickers]
-    prices, source, ts_used = {}, {}, {}
 
     def _extract_close(raw) -> pd.DataFrame:
-        if raw is None or (isinstance(raw, pd.DataFrame) and raw.empty):
+        if raw is None:
+            return pd.DataFrame()
+        if isinstance(raw, pd.DataFrame) and raw.empty:
+            return pd.DataFrame()
+        if not isinstance(raw, pd.DataFrame):
             return pd.DataFrame()
 
-        # yfinance pode vir como DataFrame com MultiIndex
-        if isinstance(raw, pd.DataFrame):
-            try:
-                close = raw["Close"]  # funciona p/ MultiIndex e p/ colunas simples
-            except Exception:
-                # fallback: tentar "xs" no MultiIndex
-                if isinstance(raw.columns, pd.MultiIndex):
-                    try:
-                        close = raw.xs("Close", axis=1, level=0)
-                    except Exception:
-                        return pd.DataFrame()
-                else:
+        try:
+            close = raw["Close"]  # funciona com MultiIndex e simples
+        except Exception:
+            if isinstance(raw.columns, pd.MultiIndex):
+                try:
+                    close = raw.xs("Close", axis=1, level=0)
+                except Exception:
                     return pd.DataFrame()
+            else:
+                return pd.DataFrame()
 
-            if isinstance(close, pd.Series):
-                close = close.to_frame()
+        if isinstance(close, pd.Series):
+            close = close.to_frame()
+        return close
 
-            return close
-
+    def _download_close_chunk(tickers_chunk, period, interval=None, tries=4):
+        for k in range(tries):
+            try:
+                raw = yf.download(
+                    tickers_chunk,
+                    period=period,
+                    interval=interval,
+                    progress=False,
+                    group_by="column",
+                    auto_adjust=False,
+                    threads=False,  # CRÍTICO
+                )
+                close = _extract_close(raw).ffill()
+                if close.empty or close.dropna(how="all").empty:
+                    raise RuntimeError("Yahoo returned empty/non-JSON data")
+                return close
+            except Exception:
+                time.sleep((0.7 * (2 ** k)) + random.random() * 0.3)
         return pd.DataFrame()
 
-    # --- Intraday 1m ---
-    intraday = pd.DataFrame()
-    ts1m = None
-    try:
-        raw_1m = yf.download(
-            tickers_sa,
-            period="1d",
-            interval="1m",
-            progress=False,
-            group_by="column",     # garante 'Close' no 1º nível quando MultiIndex
-            auto_adjust=False
-        )
-        intraday = _extract_close(raw_1m).ffill()
+    def _download_close_all(tickers_all, period, interval=None, chunk_size=6):
+        closes = []
+        for i in range(0, len(tickers_all), chunk_size):
+            chunk = tickers_all[i:i + chunk_size]
+            c = _download_close_chunk(chunk, period=period, interval=interval)
+            if not c.empty:
+                closes.append(c)
+        if not closes:
+            return pd.DataFrame()
+        out = pd.concat(closes, axis=1)
+        out = out.loc[:, ~out.columns.duplicated()]
+        return out
 
-        valid = intraday.dropna(how="all")
-        ts1m = valid.index.max() if not valid.empty else None
-        if ts1m is not None and pd.isna(ts1m):
-            ts1m = None
-    except Exception:
-        intraday = pd.DataFrame()
+    # Intraday 1m
+    intraday = _download_close_all(tickers_sa, period="1d", interval="1m", chunk_size=4)
+    valid_i = intraday.dropna(how="all")
+    ts1m = valid_i.index.max() if not valid_i.empty else None
+    if ts1m is not None and pd.isna(ts1m):
         ts1m = None
 
-    # --- Daily close ---
-    daily = pd.DataFrame()
-    tsd = None
-    try:
-        raw_d = yf.download(
-            tickers_sa,
-            period="5d",
-            progress=False,
-            group_by="column",
-            auto_adjust=False
-        )
-        daily = _extract_close(raw_d).ffill()
-
-        valid = daily.dropna(how="all")
-        tsd = valid.index.max() if not valid.empty else None
-        if tsd is not None and pd.isna(tsd):
-            tsd = None
-    except Exception:
-        daily = pd.DataFrame()
+    # Daily close
+    daily = _download_close_all(tickers_sa, period="5d", interval=None, chunk_size=6)
+    valid_d = daily.dropna(how="all")
+    tsd = valid_d.index.max() if not valid_d.empty else None
+    if tsd is not None and pd.isna(tsd):
         tsd = None
 
-    # --- pick price per ticker ---
+    prices, source, ts_used = {}, {}, {}
+
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
 
@@ -203,8 +217,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i
-            break
+            header_row = i; break
     if header_row is None:
         return pd.Series(dtype="float64")
 
@@ -212,8 +225,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     dur_idx = None
     for j, v in enumerate(header_vals):
         if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j
-            break
+            dur_idx = j; break
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
@@ -223,8 +235,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     for j in range(df.shape[1]):
         if j == dur_idx:
             continue
-        s = df.iloc[:, j].dropna()
-        cnt = 0
+        s = df.iloc[:, j].dropna(); cnt = 0
         for x in s:
             if isinstance(x, str):
                 token = x.strip().upper()
@@ -488,14 +499,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
         for t in ["MULT3","ALOS3","IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== Regras de exibição no gráfico ======
         drop_list = ["ELET3", "ELET6"]
 
         if "ENGI11" in ytm_clean.index:
@@ -509,7 +518,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
 
-        # ====== Gráfico (todas barras laranja) ======
         if len(ytm_plot) == 0:
             st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
         else:
@@ -547,7 +555,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             )
             st.plotly_chart(fig, use_container_width=True)
 
-        # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
         def set_if_missing(label, value):
@@ -556,16 +563,13 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         if "IGTI11" in duration_map.index:
             v = duration_map.loc["IGTI11"]
-            set_if_missing("IGTI3", v)
-            set_if_missing("IGTI4", v)
+            set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
 
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]
             if pd.notna(v):
-                set_if_missing("ENGI3", v)
-                set_if_missing("ENGI4", v)
+                set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration ======
         order = [
             "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
@@ -592,7 +596,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
