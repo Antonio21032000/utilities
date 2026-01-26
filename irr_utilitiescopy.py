@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -102,14 +101,16 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
         intraday = intraday.ffill()
         ts1m = intraday.dropna(how="all").index.max()
     except Exception:
-        intraday = pd.DataFrame(); ts1m = None
+        intraday = pd.DataFrame()
+        ts1m = None
 
     # Daily close
     try:
         daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
         tsd = daily.index[-1] if len(daily.index) else None
     except Exception:
-        daily = pd.DataFrame(); tsd = None
+        daily = pd.DataFrame()
+        tsd = None
 
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
@@ -177,16 +178,20 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
+    """
+    Robusto: nunca pode quebrar o app.
+    Se timestamp vier vazio/NaT/sem timezone, retorna "".
+    """
     t = pd.to_datetime(ts, errors="coerce")
-    if _isna(t):
+    if pd.isna(t):
         return ""
     try:
-        if t.tzinfo is None:
+        if getattr(t, "tzinfo", None) is None:
             t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
+        return t.strftime("%Y-%m-%d %H:%M")
     except Exception:
-        pass
-    return t.strftime("%Y-%m-%d %H:%M")
+        return ""
 
 def build_price_table_html(df: pd.DataFrame) -> str:
     rows_html = []
@@ -220,7 +225,6 @@ def main():
     st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
                        layout="wide", initial_sidebar_state="collapsed")
 
-    # ====== THEME / CSS ======
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -253,12 +257,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # Header
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
         with open(LOGO_PATH, "rb") as f:
             logo_b64 = base64.b64encode(f.read()).decode("utf-8")
+
     if logo_b64:
         st.markdown(
             "<div class='app-header'><div class='header-inner'>"
@@ -274,7 +278,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         )
 
     try:
-        # ====== Tickers (sem CPLE5; inclui AXIA7) ======
+        # ====== Tickers ======
         tickers_for_prices = [
             "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
@@ -287,7 +291,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Shares ======
         shares_classes = {
-            "CPLE3": 2_982_810_590,   # nº ações totais de COPEL ON (total econômico)
+            "CPLE3": 2_982_810_590,
             "IGTI3": 770_992_429,
             "IGTI4": 435_368_756,
             "ENGI3": 887_231_247,
@@ -328,6 +332,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
             engi_method_cap11 = True
         else:
+            # CORRETO: checa cap_34 (e não engi_total)
             engi_total = cap_34 if pd.notna(cap_34) else np.nan
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
@@ -343,6 +348,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
         ]
+
         rows = []
         for t in final_tickers:
             if t == "IGTI11":
@@ -365,6 +371,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares_axia7 = shares_series.get("AXIA7", np.nan)
 
                 price = price_axia6
+
                 if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7]):
                     shares = shares_axia6 + shares_axia3 + shares_axia7
                 else:
@@ -379,15 +386,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                     parts.append(price_axia7 * shares_axia7)
                 mc = sum(parts) if parts else np.nan
 
-            elif t == "CPLE3":
-                # MC_CPLE3 = 2.982.810.590 × Preço_CPLE3
-                price_cple3 = prices.get("CPLE3", np.nan)
-                shares_cple3 = shares_classes["CPLE3"]
-
-                price = price_cple3
-                shares = shares_cple3
-                mc = price_cple3 * shares_cple3 if pd.notna(price_cple3) else np.nan
-
             else:
                 price = prices.get(t, np.nan)
                 shares = shares_series.get(t, np.nan)
@@ -399,13 +397,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
         # ====== Excel dos fluxos ======
-        try:
-            df = pd.read_excel("irrdash3.xlsx")
-        except FileNotFoundError:
-            st.error("❌ Arquivo 'irrdash3.xlsx' não encontrado.")
-            return
-
-        df.columns = df.iloc[0]; df = df.iloc[1:]
+        df = pd.read_excel("irrdash3.xlsx")
+        df.columns = df.iloc[0]
+        df = df.iloc[1:]
 
         for t in resultado.index:
             if t not in df.columns:
@@ -487,7 +481,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
                            showgrid=False, showline=False, zeroline=False),
                 yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1,
-                           gridcolor="rgba(255,255,255,.12)", zeroline=False, tickfont=dict(color="white")),
+                           gridcolor="rgba(255,255,255,.12)", zeroline=False,
+                           tickfont=dict(color="white")),
                 margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
             )
             st.plotly_chart(fig, use_container_width=True)
@@ -507,12 +502,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Tabela de preços + Duration ======
         order = [
-            "CPLE3",
-            "IGTI3","IGTI4",
-            "ENGI3","ENGI4","ENGI11",
+            "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3",
-            "AXIA3","AXIA6","AXIA7",
+            "MULT3","ALOS3","AXIA3","AXIA6","AXIA7"
         ]
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
         tbl["Fonte"] = meta["Fonte"].reindex(order)
@@ -523,9 +515,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
-        # Nota/caption
         engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
-        st.markdown("<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>", unsafe_allow_html=True)
+        st.markdown(
+            "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, dê refresh na página</div>",
+            unsafe_allow_html=True
+        )
         st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
 
     except Exception as e:
@@ -533,6 +527,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
