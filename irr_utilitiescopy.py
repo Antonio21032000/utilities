@@ -1,4 +1,10 @@
 
+import traceback
+try:
+    pass
+except Exception:
+    st.code(traceback.format_exc())
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -328,7 +334,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
             engi_method_cap11 = True
         else:
-            engi_total = cap_34 if pd.notna(cap_34) else np.nan
+            engi_total = cap_34 if pd.notna(engi_total) else np.nan
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
 
@@ -533,6 +539,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
