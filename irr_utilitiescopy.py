@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -60,8 +61,12 @@ def compute_irr(cashflows: np.ndarray) -> float:
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     if len(cashflows) != len(dates):
         return np.nan
+
     values = np.asarray(cashflows, dtype=float)
-    dates = pd.to_datetime(dates)
+    dates = pd.to_datetime(list(dates), errors="coerce")
+    if dates.isna().any():
+        return np.nan
+
     base_date = dates[0]
     years = [(d - base_date).days / 365.25 for d in dates]
 
@@ -90,38 +95,68 @@ def cap_to_first_digits_mln(value, digits=6):
 
 # ---------- Prices ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
+    """
+    Fix do erro 'NaT':
+    - quando o intraday/daily vem vazio, index.max() vira NaT e quebrava no .loc[NaT]
+    - aqui garantimos ts1m/tsd = None quando não há dado válido
+    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
 
-    # Intraday 1m
+    # --- Intraday 1m ---
+    intraday = pd.DataFrame()
+    ts1m = None
     try:
-        intraday = yf.download(tickers_sa, period="1d", interval="1m", progress=False)["Close"]
-        if isinstance(intraday, pd.Series):
-            intraday = intraday.to_frame()
-        intraday = intraday.ffill()
-        ts1m = intraday.dropna(how="all").index.max()
+        raw = yf.download(tickers_sa, period="1d", interval="1m", progress=False)
+        close = raw["Close"] if isinstance(raw, pd.DataFrame) and "Close" in raw.columns else pd.DataFrame()
+
+        if isinstance(close, pd.Series):
+            close = close.to_frame()
+
+        intraday = close.ffill()
+
+        valid = intraday.dropna(how="all")
+        ts1m = valid.index.max() if not valid.empty else None
+        if ts1m is not None and pd.isna(ts1m):
+            ts1m = None
     except Exception:
         intraday = pd.DataFrame()
         ts1m = None
 
-    # Daily close
+    # --- Daily close ---
+    daily = pd.DataFrame()
+    tsd = None
     try:
-        daily = yf.download(tickers_sa, period="5d", progress=False)["Close"].ffill()
-        tsd = daily.index[-1] if len(daily.index) else None
+        raw = yf.download(tickers_sa, period="5d", progress=False)
+        close = raw["Close"] if isinstance(raw, pd.DataFrame) and "Close" in raw.columns else pd.DataFrame()
+
+        if isinstance(close, pd.Series):
+            close = close.to_frame()
+
+        daily = close.ffill()
+
+        valid = daily.dropna(how="all")
+        tsd = valid.index.max() if not valid.empty else None
+        if tsd is not None and pd.isna(tsd):
+            tsd = None
     except Exception:
         daily = pd.DataFrame()
         tsd = None
 
+    # --- pick price per ticker ---
     for t, tsa in zip(tickers, tickers_sa):
         val, used_ts, used_src = np.nan, None, None
-        if ts1m is not None and tsa in getattr(intraday, "columns", []):
-            v = intraday.loc[ts1m, tsa]
+
+        if (ts1m is not None) and (not intraday.empty) and (tsa in intraday.columns) and (ts1m in intraday.index):
+            v = intraday.at[ts1m, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = ts1m; used_src = "intraday 1m"
-        if (pd.isna(val)) and (tsa in getattr(daily, "columns", [])) and len(daily):
-            v = daily.iloc[-1][tsa]
+
+        if pd.isna(val) and (tsd is not None) and (not daily.empty) and (tsa in daily.columns) and (tsd in daily.index):
+            v = daily.at[tsd, tsa]
             if pd.notna(v):
                 val = float(v); used_ts = tsd; used_src = "daily close"
+
         prices[t] = val
         source[t] = used_src if used_src is not None else "N/A"
         ts_used[t] = used_ts
@@ -140,7 +175,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     header_row = None
     for i, row in raw.iterrows():
         if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i; break
+            header_row = i
+            break
     if header_row is None:
         return pd.Series(dtype="float64")
 
@@ -148,7 +184,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     dur_idx = None
     for j, v in enumerate(header_vals):
         if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j; break
+            dur_idx = j
+            break
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
@@ -158,7 +195,8 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     for j in range(df.shape[1]):
         if j == dur_idx:
             continue
-        s = df.iloc[:, j].dropna(); cnt = 0
+        s = df.iloc[:, j].dropna()
+        cnt = 0
         for x in s:
             if isinstance(x, str):
                 token = x.strip().upper()
@@ -222,10 +260,15 @@ def build_price_table_html(df: pd.DataFrame) -> str:
 
 # ---------- App ----------
 def main():
-    st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
-                       layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(
+        page_title="IRR Real Dashboard",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="collapsed",
+    )
 
-    st.markdown("""
+    st.markdown(
+        """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{ --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
@@ -255,7 +298,9 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
-""", unsafe_allow_html=True)
+""",
+        unsafe_allow_html=True,
+    )
 
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
@@ -332,7 +377,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
             engi_method_cap11 = True
         else:
-            # CORRETO: checa cap_34 (e não engi_total)
             engi_total = cap_34 if pd.notna(cap_34) else np.nan
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
@@ -362,7 +406,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 mc = engi_total
 
             elif t == "AXIA6":
-                # MC_AXIA6 = AXIA6 + AXIA3 + AXIA7
                 price_axia6 = prices.get("AXIA6", np.nan)
                 shares_axia6 = shares_series.get("AXIA6", np.nan)
                 price_axia3 = prices.get("AXIA3", np.nan)
@@ -407,6 +450,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         target_row = df.index[0]
         today = datetime.now().date()
+
         for t in resultado.index:
             df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
 
@@ -420,6 +464,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
+
             cashflows = series_cf.values.astype(float).copy()
             n_periods = len(cashflows)
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
@@ -489,16 +534,21 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Duration (aba 'duration') ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
+
         def set_if_missing(label, value):
             if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
                 duration_map.loc[label] = value
+
         if "IGTI11" in duration_map.index:
             v = duration_map.loc["IGTI11"]
-            set_if_missing("IGTI3", v); set_if_missing("IGTI4", v)
+            set_if_missing("IGTI3", v)
+            set_if_missing("IGTI4", v)
+
         if "ENGI11" in duration_map.index:
             v = duration_map.loc["ENGI11"]
             if pd.notna(v):
-                set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
+                set_if_missing("ENGI3", v)
+                set_if_missing("ENGI4", v)
 
         # ====== Tabela de preços + Duration ======
         order = [
@@ -513,6 +563,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
+
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
