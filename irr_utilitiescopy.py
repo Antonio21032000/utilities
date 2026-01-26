@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -96,24 +95,52 @@ def cap_to_first_digits_mln(value, digits=6):
 # ---------- Prices ----------
 def fetch_latest_prices_intraday_with_fallback(tickers):
     """
-    Fix do erro 'NaT':
-    - quando o intraday/daily vem vazio, index.max() vira NaT e quebrava no .loc[NaT]
-    - aqui garantimos ts1m/tsd = None quando não há dado válido
+    Robusto contra:
+      - MultiIndex do yfinance.download() (múltiplos tickers)
+      - retorno vazio (sem candles) => evita ts=NaT
+      - single ticker (Series) vs multi ticker (DataFrame)
     """
     tickers_sa = [f"{t}.SA" for t in tickers]
     prices, source, ts_used = {}, {}, {}
+
+    def _extract_close(raw) -> pd.DataFrame:
+        if raw is None or (isinstance(raw, pd.DataFrame) and raw.empty):
+            return pd.DataFrame()
+
+        # yfinance pode vir como DataFrame com MultiIndex
+        if isinstance(raw, pd.DataFrame):
+            try:
+                close = raw["Close"]  # funciona p/ MultiIndex e p/ colunas simples
+            except Exception:
+                # fallback: tentar "xs" no MultiIndex
+                if isinstance(raw.columns, pd.MultiIndex):
+                    try:
+                        close = raw.xs("Close", axis=1, level=0)
+                    except Exception:
+                        return pd.DataFrame()
+                else:
+                    return pd.DataFrame()
+
+            if isinstance(close, pd.Series):
+                close = close.to_frame()
+
+            return close
+
+        return pd.DataFrame()
 
     # --- Intraday 1m ---
     intraday = pd.DataFrame()
     ts1m = None
     try:
-        raw = yf.download(tickers_sa, period="1d", interval="1m", progress=False)
-        close = raw["Close"] if isinstance(raw, pd.DataFrame) and "Close" in raw.columns else pd.DataFrame()
-
-        if isinstance(close, pd.Series):
-            close = close.to_frame()
-
-        intraday = close.ffill()
+        raw_1m = yf.download(
+            tickers_sa,
+            period="1d",
+            interval="1m",
+            progress=False,
+            group_by="column",     # garante 'Close' no 1º nível quando MultiIndex
+            auto_adjust=False
+        )
+        intraday = _extract_close(raw_1m).ffill()
 
         valid = intraday.dropna(how="all")
         ts1m = valid.index.max() if not valid.empty else None
@@ -127,13 +154,14 @@ def fetch_latest_prices_intraday_with_fallback(tickers):
     daily = pd.DataFrame()
     tsd = None
     try:
-        raw = yf.download(tickers_sa, period="5d", progress=False)
-        close = raw["Close"] if isinstance(raw, pd.DataFrame) and "Close" in raw.columns else pd.DataFrame()
-
-        if isinstance(close, pd.Series):
-            close = close.to_frame()
-
-        daily = close.ffill()
+        raw_d = yf.download(
+            tickers_sa,
+            period="5d",
+            progress=False,
+            group_by="column",
+            auto_adjust=False
+        )
+        daily = _extract_close(raw_d).ffill()
 
         valid = daily.dropna(how="all")
         tsd = valid.index.max() if not valid.empty else None
@@ -216,10 +244,6 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
-    """
-    Robusto: nunca pode quebrar o app.
-    Se timestamp vier vazio/NaT/sem timezone, retorna "".
-    """
     t = pd.to_datetime(ts, errors="coerce")
     if pd.isna(t):
         return ""
@@ -260,15 +284,10 @@ def build_price_table_html(df: pd.DataFrame) -> str:
 
 # ---------- App ----------
 def main():
-    st.set_page_config(
-        page_title="IRR Real Dashboard",
-        page_icon="📈",
-        layout="wide",
-        initial_sidebar_state="collapsed",
-    )
+    st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
+                       layout="wide", initial_sidebar_state="collapsed")
 
-    st.markdown(
-        """
+    st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
 :root{ --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
@@ -298,9 +317,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
-""",
-        unsafe_allow_html=True,
-    )
+""", unsafe_allow_html=True)
 
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
@@ -450,7 +467,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         target_row = df.index[0]
         today = datetime.now().date()
-
         for t in resultado.index:
             df.loc[target_row, t] = -abs(resultado.loc[t, "market_cap"])
 
@@ -464,7 +480,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
-
             cashflows = series_cf.values.astype(float).copy()
             n_periods = len(cashflows)
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
@@ -563,7 +578,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
-
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
