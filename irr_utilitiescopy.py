@@ -1,10 +1,4 @@
 
-import traceback
-try:
-    pass
-except Exception:
-    st.code(traceback.format_exc())
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -539,6 +533,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
 
 
 
