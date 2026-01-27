@@ -1,22 +1,11 @@
+
 import streamlit as st
-import yfinance as yf
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
 from datetime import datetime, date
-import base64, os, re, tempfile
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
-
-# =========================================================
-# yfinance: força tz-cache para um lugar seguro no Cloud
-# =========================================================
-try:
-    from yfinance.utils import set_tz_cache_location
-    _tz_dir = os.path.join(tempfile.gettempdir(), "py-yfinance-tzcache")
-    os.makedirs(_tz_dir, exist_ok=True)
-    set_tz_cache_location(_tz_dir)
-except Exception:
-    pass
+import base64, os, re, time, random
+import requests
 
 # ---------- Finance helpers ----------
 try:
@@ -24,14 +13,9 @@ try:
 except Exception:
     npf = None
 
-# ---------- Paths (cache local no Streamlit Cloud) ----------
-CACHE_DIR = tempfile.gettempdir()
-LAST_PRICES_PATH = os.path.join(CACHE_DIR, "last_prices.pkl")
-LAST_META_PATH = os.path.join(CACHE_DIR, "last_prices_meta.pkl")
-
-# =========================================================
+# ----------------------------
 # Helpers seguros contra NA/NaT
-# =========================================================
+# ----------------------------
 def _isna(x):
     try:
         return pd.isna(x)
@@ -49,9 +33,9 @@ def sfloat(x: object, nd: int = 2) -> str:
     except Exception:
         return sblank(x)
 
-# =========================================================
-# IRR helpers
-# =========================================================
+# ----------------------------
+# IRR / XIRR
+# ----------------------------
 def compute_irr(cashflows: np.ndarray) -> float:
     values = np.asarray(cashflows, dtype=float)
     if npf is not None:
@@ -68,7 +52,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
     f_low, f_high = npv(low), npv(high)
     if np.sign(f_low) == np.sign(f_high):
         return np.nan
-
     for _ in range(100):
         mid = (low + high) / 2.0
         f_mid = npv(mid)
@@ -83,7 +66,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     if len(cashflows) != len(dates):
         return np.nan
-
     values = np.asarray(cashflows, dtype=float)
     dates = pd.to_datetime(dates, errors="coerce")
     if dates.isna().any():
@@ -96,76 +78,120 @@ def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> floa
         return sum(cf / (1 + rate) ** year for cf, year in zip(values, years))
 
     rate = guess
-    for _ in range(80):
+    for _ in range(100):
         npv_val = xnpv(rate)
         if abs(npv_val) < 1e-6:
             return rate
-
         delta = 1e-6
         d_npv = (xnpv(rate + delta) - xnpv(rate - delta)) / (2 * delta)
         if abs(d_npv) < 1e-10:
             return np.nan
-
         rate = rate - npv_val / d_npv
         if rate < -0.99 or rate > 100:
             return np.nan
     return rate
 
 def cap_to_first_digits_mln(value, digits=6):
+    if pd.isna(value):
+        return np.nan
     try:
-        if pd.isna(value):
-            return np.nan
-        total_mln = int(round(float(value) / 1e6))
-        return int(str(abs(total_mln))[:digits])
+        total_mln = round(float(value) / 1e6)
+        return int(str(int(total_mln))[:digits])
     except Exception:
         return np.nan
 
-# =========================================================
-# Cache helpers (pickle – sem pyarrow)
-# =========================================================
-def load_last_prices():
-    if os.path.exists(LAST_PRICES_PATH) and os.path.exists(LAST_META_PATH):
-        try:
-            prices = pd.read_pickle(LAST_PRICES_PATH)
-            meta = pd.read_pickle(LAST_META_PATH)
-            if isinstance(prices, pd.DataFrame):
-                prices = prices.squeeze()
-            prices = pd.Series(prices, name="preco")
-            if not isinstance(meta, pd.DataFrame):
-                meta = pd.DataFrame(meta)
-            return prices, meta
-        except Exception:
-            return None, None
-    return None, None
+# ----------------------------
+# Yahoo Finance (robusto)
+# ----------------------------
+_UA_LIST = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36",
+]
 
-def save_last_prices(prices: pd.Series, meta: pd.DataFrame):
-    try:
-        pd.Series(prices, name="preco").to_pickle(LAST_PRICES_PATH)
-        meta.to_pickle(LAST_META_PATH)
-    except Exception:
-        pass
+def _yahoo_headers():
+    return {
+        "User-Agent": random.choice(_UA_LIST),
+        "Accept": "application/json, text/plain, */*",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Connection": "keep-alive",
+    }
 
-# =========================================================
-# Timestamp format
-# =========================================================
-def format_ts_brt(ts) -> str:
-    t = pd.to_datetime(ts, errors="coerce")
+def _to_brt(ts_utc):
+    t = pd.to_datetime(ts_utc, errors="coerce", utc=True)
     if pd.isna(t):
         return ""
     try:
-        if getattr(t, "tzinfo", None) is None:
-            t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
         return t.strftime("%Y-%m-%d %H:%M")
     except Exception:
         return ""
 
-# =========================================================
+def fetch_latest_prices_yahoo_quote(tickers: list[str], timeout_s: int = 8):
+    """
+    1 request só (bem menos chance de rate-limit).
+    Retorna: price_series (index=ticker), meta_df (Fonte, Timestamp)
+    """
+    tickers_sa = [f"{t}.SA" for t in tickers]
+    symbols = ",".join(tickers_sa)
+
+    url = "https://query1.finance.yahoo.com/v7/finance/quote"
+    params = {"symbols": symbols}
+
+    prices = {t: np.nan for t in tickers}
+    source = {t: "N/A" for t in tickers}
+    ts_used = {t: pd.NaT for t in tickers}
+
+    # retries curtos p/ 429/503
+    for attempt in range(3):
+        try:
+            r = requests.get(url, params=params, headers=_yahoo_headers(), timeout=timeout_s)
+            # se tomou rate-limit, tenta de novo
+            if r.status_code in (429, 401, 403, 503):
+                time.sleep(0.4 + 0.4 * attempt)
+                continue
+            r.raise_for_status()
+
+            js = r.json()
+            result = js.get("quoteResponse", {}).get("result", [])
+
+            for item in result:
+                sym = item.get("symbol", "")
+                if not sym.endswith(".SA"):
+                    continue
+                t = sym.replace(".SA", "")
+                px = item.get("regularMarketPrice", None)
+                if px is None:
+                    # fallback (às vezes pós/prev close)
+                    px = item.get("postMarketPrice", None)
+                if px is None:
+                    px = item.get("previousClose", None)
+
+                if px is not None:
+                    prices[t] = float(px)
+                    source[t] = "yahoo quote"
+                    mkt_time = item.get("regularMarketTime", None)
+                    if mkt_time is not None:
+                        ts_used[t] = pd.to_datetime(int(mkt_time), unit="s", utc=True)
+
+            break  # sucesso (mesmo parcial)
+        except Exception:
+            time.sleep(0.4 + 0.4 * attempt)
+
+    price_series = pd.Series(prices, name="preco")
+    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
+    return price_series, meta
+
+@st.cache_data(ttl=300, show_spinner=False)
+def get_prices_cached(tickers_tuple: tuple[str, ...]):
+    return fetch_latest_prices_yahoo_quote(list(tickers_tuple), timeout_s=8)
+
+# ----------------------------
 # Duration loader
-# =========================================================
+# ----------------------------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     try:
-        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
+        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None, engine="openpyxl")
     except Exception:
         return pd.Series(dtype="float64")
 
@@ -186,7 +212,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
-    df = raw.iloc[header_row + 1 :].reset_index(drop=True)
+    df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
@@ -212,14 +238,14 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
 
-# =========================================================
-# UI table HTML
-# =========================================================
+# ----------------------------
+# HTML table
+# ----------------------------
 def build_price_table_html(df: pd.DataFrame) -> str:
     rows_html = []
     for _, r in df.iterrows():
         fonte = sblank(r.get("Fonte"))
-        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
+        badge_class = "badge-live" if "quote" in fonte.lower() else "badge-daily"
         preco = sfloat(r.get("Preço"))
         ts = sblank(r.get("Timestamp"))
         dur = sfloat(r.get("Duration"))
@@ -238,116 +264,13 @@ def build_price_table_html(df: pd.DataFrame) -> str:
         "<table class='styled-table'>"
         "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
         "<tbody>" + "".join(rows_html) + "</tbody></table>"
-        "<div class='table-note'>intraday pode ter atraso • Timestamp em horário de Brasília.</div>"
+        "<div class='table-note'>Fonte = Yahoo Finance Quote • Timestamp em horário de Brasília.</div>"
         "</div>"
     )
 
-# =========================================================
-# Yahoo fetch (robusto p/ 1 ticker e muitos tickers)
-# =========================================================
-def _yf_download_close(tickers_sa, period, interval, timeout_s=8):
-    """
-    Retorna um DF apenas com Close, colunas = tickers_sa.
-    Funciona mesmo quando tickers_sa tem 1 item (quando o yfinance devolve colunas 'Close').
-    """
-    df = yf.download(
-        tickers_sa,
-        period=period,
-        interval=interval,
-        progress=False,
-        group_by="column",
-        auto_adjust=False,
-        actions=False,
-        threads=False,      # importantíssimo no Cloud
-        timeout=timeout_s,  # timeout do requests interno
-    )
-
-    if not isinstance(df, pd.DataFrame) or df.empty:
-        return pd.DataFrame()
-
-    # Caso multiindex (vários tickers)
-    if isinstance(df.columns, pd.MultiIndex):
-        if "Close" not in df.columns.get_level_values(0):
-            return pd.DataFrame()
-        close = df["Close"].copy()
-        # garante colunas = tickers_sa
-        return close.ffill()
-
-    # Caso 1 ticker (colunas normais: Open/High/Low/Close/Adj Close/Volume)
-    if "Close" in df.columns:
-        close = df[["Close"]].copy()
-        # renomeia 'Close' para o ticker
-        ticker_name = tickers_sa[0] if len(tickers_sa) >= 1 else "Close"
-        close = close.rename(columns={"Close": ticker_name})
-        return close.ffill()
-
-    return pd.DataFrame()
-
-def fetch_prices_yahoo_safe(tickers, max_total_seconds=10):
-    """
-    - Probe rápido para detectar bloqueio geral (sem travar UX).
-    - Depois baixa tudo em 1 chamada (intraday) e fallback (daily).
-    - Timeout duro total via ThreadPoolExecutor.
-    """
-    tickers_sa = [f"{t}.SA" for t in tickers]
-    probe_ticker = tickers_sa[0] if tickers_sa else "VALE3.SA"
-
-    def _job():
-        # probe daily rápido
-        probe = _yf_download_close([probe_ticker], period="5d", interval="1d", timeout_s=6)
-        if probe.empty:
-            return None, None, "probe_failed"
-
-        intraday = _yf_download_close(tickers_sa, period="1d", interval="1m", timeout_s=8)
-        ts_intraday = intraday.dropna(how="all").index.max() if len(intraday) else None
-
-        daily = _yf_download_close(tickers_sa, period="5d", interval="1d", timeout_s=8)
-        ts_daily = daily.dropna(how="all").index.max() if len(daily) else None
-
-        prices, source, ts_used = {}, {}, {}
-
-        for t, tsa in zip(tickers, tickers_sa):
-            val, used_ts, used_src = np.nan, None, None
-
-            if ts_intraday is not None and tsa in intraday.columns:
-                v = intraday.loc[ts_intraday, tsa]
-                if pd.notna(v):
-                    val = float(v)
-                    used_ts = ts_intraday
-                    used_src = "intraday 1m"
-
-            if pd.isna(val) and ts_daily is not None and tsa in daily.columns:
-                v = daily.loc[ts_daily, tsa]
-                if pd.notna(v):
-                    val = float(v)
-                    used_ts = ts_daily
-                    used_src = "daily close"
-
-            prices[t] = val
-            source[t] = used_src if used_src is not None else "N/A"
-            ts_used[t] = used_ts
-
-        price_series = pd.Series(prices, name="preco")
-        meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
-        return price_series, meta, "ok"
-
-    with ThreadPoolExecutor(max_workers=1) as ex:
-        fut = ex.submit(_job)
-        try:
-            prices, meta, status = fut.result(timeout=max_total_seconds)
-        except FuturesTimeout:
-            return None, None, "timeout"
-        except Exception:
-            return None, None, "error"
-
-    if status != "ok" or prices is None:
-        return None, None, status
-
-    return prices, meta, "ok"
-
-# =========================================================
+# ----------------------------
 # App
-# =========================================================
+# ----------------------------
 def main():
     st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
                        layout="wide", initial_sidebar_state="collapsed")
@@ -384,7 +307,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # Header com logo
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
@@ -405,59 +327,27 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             unsafe_allow_html=True,
         )
 
-    # ====== Tickers ======
-    tickers_for_prices = [
-        "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-        "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-        "MULT3","ALOS3","AXIA3","AXIA6","AXIA7",
-    ]
-
-    # ====== UX: mostra cache IMEDIATO (se existir) ======
-    cached_prices, cached_meta = load_last_prices()
-    has_cache = cached_prices is not None and cached_meta is not None
-
-    colA, colB = st.columns([1.2, 4.8])
-    with colA:
-        refresh = st.button("🔄 Atualizar preços agora", use_container_width=True)
-    with colB:
-        st.caption("Se o Yahoo bloquear, o app não trava: mantém o último cache salvo.")
-
-    # Default: usar cache
-    if has_cache:
-        prices_series = cached_prices.reindex(tickers_for_prices)
-        meta = cached_meta.reindex(tickers_for_prices)
-        st.info("Mostrando últimos preços salvos. Clique em “Atualizar preços agora” para tentar pegar os mais recentes.")
-    else:
-        prices_series = pd.Series(index=tickers_for_prices, dtype="float64", name="preco")
-        meta = pd.DataFrame(index=tickers_for_prices, data={"Fonte": "N/A", "Timestamp": pd.NaT})
-
-    # Se não tem cache, faz 1 tentativa automática. Se tem cache, só atualiza se clicar.
-    need_fetch = refresh or (not has_cache)
-
-    status_box = st.empty()
-    if need_fetch:
-        status_box.info("Baixando preços do Yahoo Finance (timeout ~10s)...")
-        with st.spinner("Carregando..."):
-            prices_new, meta_new, stt = fetch_prices_yahoo_safe(tickers_for_prices, max_total_seconds=10)
-
-        if stt == "ok" and prices_new is not None and prices_new.notna().sum() > 0:
-            prices_series = prices_new
-            meta = meta_new
-            save_last_prices(prices_series, meta)
-            status_box.success("✅ Preços atualizados com sucesso (Yahoo).")
-        else:
-            msg = "⚠️ Não consegui atualizar pelo Yahoo agora."
-            if stt == "timeout":
-                msg += " (timeout)"
-            elif stt == "probe_failed":
-                msg += " (bloqueio/rate-limit provável)"
-            else:
-                msg += " (erro)"
-            status_box.warning(msg + " Mantendo o último cache disponível.")
-
-    # A partir daqui, o app sempre segue (cache ou novo)
     try:
-        prices = pd.to_numeric(prices_series, errors="coerce").astype(float)
+        tickers_for_prices = [
+            "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
+            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
+            "MULT3","ALOS3","AXIA3","AXIA6","AXIA7",
+        ]
+
+        # Botão simples p/ refresh (limpa cache)
+        col1, col2 = st.columns([1, 6])
+        with col1:
+            if st.button("🔄 Atualizar"):
+                get_prices_cached.clear()
+
+        with st.spinner("Baixando preços do Yahoo Finance (timeout ~8s)..."):
+            prices_series, meta = get_prices_cached(tuple(tickers_for_prices))
+
+        # Se tudo vier NaN, não trava: mostra aviso e segue (tabela N/A)
+        if prices_series.isna().all():
+            st.warning("Não consegui obter preços do Yahoo agora (provável rate-limit/bloqueio temporário no Cloud).")
+
+        prices = prices_series.astype(float)
 
         # ====== Shares ======
         shares_classes = {
@@ -503,12 +393,13 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_method_cap11 = True
         else:
             engi_total = cap_34 if pd.notna(cap_34) else np.nan
-            engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
+            engi_calc_source = "sem cap_11 (fallback cap_34)"
             engi_method_cap11 = False
 
         # IGTI total (ticker sintético IGTI11)
-        igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
-        if pd.isna(igti_total):
+        if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
+            igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
+        else:
             igti_total = np.nan
 
         # ====== Tabela final (para XIRR) ======
@@ -530,6 +421,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 mc = engi_total
 
             elif t == "AXIA6":
+                # MC_AXIA6 = AXIA6 + AXIA3 + AXIA7
                 price_axia6 = prices.get("AXIA6", np.nan)
                 shares_axia6 = shares_series.get("AXIA6", np.nan)
                 price_axia3 = prices.get("AXIA3", np.nan)
@@ -538,11 +430,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares_axia7 = shares_series.get("AXIA7", np.nan)
 
                 price = price_axia6
-                shares = (
-                    shares_axia6 + shares_axia3 + shares_axia7
-                    if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7])
-                    else np.nan
-                )
+
+                if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7]):
+                    shares = shares_axia6 + shares_axia3 + shares_axia7
+                else:
+                    shares = np.nan
 
                 parts = []
                 if pd.notna(price_axia6) and pd.notna(shares_axia6):
@@ -564,7 +456,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
         # ====== Excel dos fluxos ======
-        df = pd.read_excel("irrdash3.xlsx")
+        df = pd.read_excel("irrdash3.xlsx", engine="openpyxl")
         df.columns = df.iloc[0]
         df = df.iloc[1:]
 
@@ -574,9 +466,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         target_row = df.index[0]
         today = datetime.now().date()
+
         for t in resultado.index:
-            v = resultado.loc[t, "market_cap"]
-            df.loc[target_row, t] = -abs(float(v)) if pd.notna(v) else np.nan
+            mc_val = resultado.loc[t, "market_cap"]
+            df.loc[target_row, t] = -float(abs(mc_val)) if pd.notna(mc_val) else np.nan
 
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
@@ -658,41 +551,24 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Duration ======
         duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
 
-        def set_if_missing(label, value):
-            if (label not in duration_map.index) or pd.isna(duration_map.loc[label]):
-                duration_map.loc[label] = value
-
-        if "IGTI11" in duration_map.index:
-            v = duration_map.loc["IGTI11"]
-            set_if_missing("IGTI3", v)
-            set_if_missing("IGTI4", v)
-
-        if "ENGI11" in duration_map.index:
-            v = duration_map.loc["ENGI11"]
-            if pd.notna(v):
-                set_if_missing("ENGI3", v)
-                set_if_missing("ENGI4", v)
-
         # ====== Tabela de preços + Duration ======
         order = [
             "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
             "MULT3","ALOS3","AXIA3","AXIA6","AXIA7"
         ]
-
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
-        tbl["Fonte"] = meta["Fonte"].reindex(order) if "Fonte" in meta.columns else "N/A"
-        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(format_ts_brt) if "Timestamp" in meta.columns else ""
+        tbl["Fonte"] = meta["Fonte"].reindex(order)
+        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(_to_brt)
         tbl = tbl.rename_axis("Ticker").reset_index()
         tbl["Duration"] = tbl["Ticker"].map(duration_map)
         tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
         tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
-
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
         st.markdown(
-            "<div class='footer-note'>💡 Se o Yahoo bloquear, o app mantém o último cache salvo. Use “Atualizar preços” para tentar novamente.</div>",
+            "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, clique em Atualizar</div>",
             unsafe_allow_html=True
         )
         st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
