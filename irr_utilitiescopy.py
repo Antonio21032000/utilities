@@ -270,13 +270,11 @@ def _yf_download_close(tickers_sa, period, interval, timeout_s=8):
         if "Close" not in df.columns.get_level_values(0):
             return pd.DataFrame()
         close = df["Close"].copy()
-        # garante colunas = tickers_sa
         return close.ffill()
 
-    # Caso 1 ticker (colunas normais: Open/High/Low/Close/Adj Close/Volume)
+    # Caso 1 ticker
     if "Close" in df.columns:
         close = df[["Close"]].copy()
-        # renomeia 'Close' para o ticker
         ticker_name = tickers_sa[0] if len(tickers_sa) >= 1 else "Close"
         close = close.rename(columns={"Close": ticker_name})
         return close.ffill()
@@ -293,7 +291,6 @@ def fetch_prices_yahoo_safe(tickers, max_total_seconds=10):
     probe_ticker = tickers_sa[0] if tickers_sa else "VALE3.SA"
 
     def _job():
-        # probe daily rápido
         probe = _yf_download_close([probe_ticker], period="5d", interval="1d", timeout_s=6)
         if probe.empty:
             return None, None, "probe_failed"
@@ -349,38 +346,66 @@ def fetch_prices_yahoo_safe(tickers, max_total_seconds=10):
 # App
 # =========================================================
 def main():
-    st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
-                       layout="wide", initial_sidebar_state="collapsed")
+    st.set_page_config(
+        page_title="IRR Real Dashboard",
+        page_icon="📈",
+        layout="wide",
+        initial_sidebar_state="collapsed"
+    )
 
     st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-:root{ --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
-       --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
-       --stk-header-bg:#ffffff; --stk-header-fg:#0e314a; }
+:root{
+  --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
+  --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
+  --stk-header-bg:#ffffff; --stk-header-fg:#0e314a;
+}
 html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
 html, body, .stApp,[data-testid="stAppViewContainer"],[data-testid="stDecoration"],
-header[data-testid="stHeader"], header[data-testid="stHeader"] *,[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
+header[data-testid="stHeader"], header[data-testid="stHeader"] *,
+[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
 header[data-testid="stHeader"]{box-shadow:none !important;}
 .block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
-.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px; margin:16px 0 16px; box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
+
+.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px; margin:16px 0 16px;
+  box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
 .header-inner{position:relative; height:48px; display:flex; align-items:center; justify-content:center;}
-.stk-logo{position:absolute; left:16px; top:50%; transform:translateY(-50%); height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
+.stk-logo{position:absolute; left:16px; top:50%; transform:translateY(-50%); height:44px; width:auto;
+  filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
 .app-header h1{margin:0; color:var(--stk-header-fg); font-weight:800; letter-spacing:.4px;}
-.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
+
+.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px;
+  color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
+
 .table-wrap{margin:14px 0 8px;}
 .table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
-.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
-.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600; border-bottom:1px solid rgba(255,255,255,.08);}
+.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03);
+  border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
+.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600;
+  border-bottom:1px solid rgba(255,255,255,.08);}
 .styled-table tbody td{color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);}
 .styled-table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
 .styled-table tbody tr:last-child td{border-bottom:none;}
 .styled-table td.num{text-align:right; font-variant-numeric:tabular-nums;}
+
 .badge{display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem; border:1px solid transparent;}
 .badge-live{background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25);}
 .badge-daily{background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25);}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
+
+/* ===== Banner de cache (substitui st.info, melhora contraste) ===== */
+.cache-banner{
+  background: rgba(255,255,255,.07);
+  border: 1px solid rgba(255,255,255,.22);
+  color: #ffffff;
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-weight: 600;
+  margin: 10px 0 12px;
+}
+.cache-banner b{ color:#FFD14F; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -426,7 +451,14 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     if has_cache:
         prices_series = cached_prices.reindex(tickers_for_prices)
         meta = cached_meta.reindex(tickers_for_prices)
-        st.info("Mostrando últimos preços salvos. Clique em “Atualizar preços agora” para tentar pegar os mais recentes.")
+
+        # (AJUSTE) banner com contraste bom
+        st.markdown(
+            "<div class='cache-banner'>"
+            "Mostrando <b>últimos preços salvos</b>. Clique em <b>“Atualizar preços agora”</b> para tentar pegar os mais recentes."
+            "</div>",
+            unsafe_allow_html=True
+        )
     else:
         prices_series = pd.Series(index=tickers_for_prices, dtype="float64", name="preco")
         meta = pd.DataFrame(index=tickers_for_prices, data={"Fonte": "N/A", "Timestamp": pd.NaT})
@@ -702,6 +734,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
