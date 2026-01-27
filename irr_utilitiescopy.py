@@ -1,583 +1,222 @@
-
-import streamlit as st
+import os
+import time
+import random
 import pandas as pd
-import numpy as np
-import plotly.graph_objects as go
-from datetime import datetime, date
-import base64, os, re, time, random
+import streamlit as st
+import yfinance as yf
 import requests
+from contextlib import contextmanager
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
-# ---------- Finance helpers ----------
-try:
-    import numpy_financial as npf
-except Exception:
-    npf = None
-
-# ----------------------------
-# Helpers seguros contra NA/NaT
-# ----------------------------
-def _isna(x):
+# ------------------------------
+# UX: st.status (novo) com fallback p/ st.spinner (antigo)
+# ------------------------------
+@contextmanager
+def status_or_spinner(label: str):
     try:
-        return pd.isna(x)
+        with st.status(label, expanded=False) as s:
+            yield s
     except Exception:
-        return x is None
+        with st.spinner(label):
+            yield None
 
-def sblank(x: object) -> str:
-    return "" if _isna(x) else str(x)
-
-def sfloat(x: object, nd: int = 2) -> str:
-    if _isna(x):
-        return ""
+# ------------------------------
+# yfinance: reduzir erros de timezone cache (race condition no cloud)
+# ------------------------------
+def _init_yf_cache_dir():
+    cache_dir = os.environ.get("YF_TZ_CACHE", "/tmp/py-yfinance-tz")
+    os.makedirs(cache_dir, exist_ok=True)
     try:
-        return f"{float(x):.{nd}f}"
+        # disponível em versões recentes
+        yf.set_tz_cache_location(cache_dir)
     except Exception:
-        return sblank(x)
+        pass
 
-# ----------------------------
-# IRR / XIRR
-# ----------------------------
-def compute_irr(cashflows: np.ndarray) -> float:
-    values = np.asarray(cashflows, dtype=float)
-    if npf is not None:
-        try:
-            return float(npf.irr(values))
-        except Exception:
-            pass
-
-    def npv(rate: float) -> float:
-        periods = np.arange(values.shape[0], dtype=float)
-        return float(np.sum(values / (1.0 + rate) ** periods))
-
-    low, high = -0.99, 10.0
-    f_low, f_high = npv(low), npv(high)
-    if np.sign(f_low) == np.sign(f_high):
-        return np.nan
-    for _ in range(100):
-        mid = (low + high) / 2.0
-        f_mid = npv(mid)
-        if abs(f_mid) < 1e-8:
-            return mid
-        if np.sign(f_low) * np.sign(f_mid) <= 0:
-            high, f_high = mid, f_mid
-        else:
-            low, f_low = mid, f_mid
-    return mid
-
-def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
-    if len(cashflows) != len(dates):
-        return np.nan
-    values = np.asarray(cashflows, dtype=float)
-    dates = pd.to_datetime(dates, errors="coerce")
-    if dates.isna().any():
-        return np.nan
-
-    base_date = dates[0]
-    years = [(d - base_date).days / 365.25 for d in dates]
-
-    def xnpv(rate):
-        return sum(cf / (1 + rate) ** year for cf, year in zip(values, years))
-
-    rate = guess
-    for _ in range(100):
-        npv_val = xnpv(rate)
-        if abs(npv_val) < 1e-6:
-            return rate
-        delta = 1e-6
-        d_npv = (xnpv(rate + delta) - xnpv(rate - delta)) / (2 * delta)
-        if abs(d_npv) < 1e-10:
-            return np.nan
-        rate = rate - npv_val / d_npv
-        if rate < -0.99 or rate > 100:
-            return np.nan
-    return rate
-
-def cap_to_first_digits_mln(value, digits=6):
-    if pd.isna(value):
-        return np.nan
-    try:
-        total_mln = round(float(value) / 1e6)
-        return int(str(int(total_mln))[:digits])
-    except Exception:
-        return np.nan
-
-# ----------------------------
-# Yahoo Finance (robusto)
-# ----------------------------
-_UA_LIST = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0 Safari/537.36",
-]
-
-def _yahoo_headers():
-    return {
-        "User-Agent": random.choice(_UA_LIST),
-        "Accept": "application/json, text/plain, */*",
-        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+# ------------------------------
+# Sessão HTTP com retry (429/5xx) + pool maior
+# ------------------------------
+def _build_requests_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/json;q=0.9,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9,pt-BR;q=0.8",
         "Connection": "keep-alive",
-    }
+    })
 
-def _to_brt(ts_utc):
-    t = pd.to_datetime(ts_utc, errors="coerce", utc=True)
-    if pd.isna(t):
-        return ""
-    try:
-        t = t.tz_convert("America/Sao_Paulo")
-        return t.strftime("%Y-%m-%d %H:%M")
-    except Exception:
-        return ""
+    retry = Retry(
+        total=4,
+        backoff_factor=0.8,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=30, pool_maxsize=30)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
 
-def fetch_latest_prices_yahoo_quote(tickers: list[str], timeout_s: int = 8):
+def _normalize_b3(t: str) -> str:
+    t = (t or "").strip().upper()
+    if not t:
+        return t
+    if t.endswith(".SA"):
+        return t
+    return f"{t}.SA"
+
+# ------------------------------
+# Download em LOTE (1 chamada), SEM threads
+# ------------------------------
+def _download_batch_last_close(tickers: list[str], session: requests.Session) -> tuple[dict, dict]:
     """
-    1 request só (bem menos chance de rate-limit).
-    Retorna: price_series (index=ticker), meta_df (Fonte, Timestamp)
+    Retorna:
+      prices[ticker] = float|None
+      stamps[ticker] = pd.Timestamp|None
     """
-    tickers_sa = [f"{t}.SA" for t in tickers]
-    symbols = ",".join(tickers_sa)
+    tickers = [_normalize_b3(t) for t in tickers if t and str(t).strip()]
+    prices, stamps = {}, {}
 
-    url = "https://query1.finance.yahoo.com/v7/finance/quote"
-    params = {"symbols": symbols}
+    if not tickers:
+        return prices, stamps
 
-    prices = {t: np.nan for t in tickers}
-    source = {t: "N/A" for t in tickers}
-    ts_used = {t: pd.NaT for t in tickers}
+    # yfinance: caminho mais "barato" é pegar diário recente
+    # (intraday aumenta chance de rate-limit)
+    tick_str = " ".join(tickers)
 
-    # retries curtos p/ 429/503
-    for attempt in range(3):
-        try:
-            r = requests.get(url, params=params, headers=_yahoo_headers(), timeout=timeout_s)
-            # se tomou rate-limit, tenta de novo
-            if r.status_code in (429, 401, 403, 503):
-                time.sleep(0.4 + 0.4 * attempt)
-                continue
-            r.raise_for_status()
-
-            js = r.json()
-            result = js.get("quoteResponse", {}).get("result", [])
-
-            for item in result:
-                sym = item.get("symbol", "")
-                if not sym.endswith(".SA"):
-                    continue
-                t = sym.replace(".SA", "")
-                px = item.get("regularMarketPrice", None)
-                if px is None:
-                    # fallback (às vezes pós/prev close)
-                    px = item.get("postMarketPrice", None)
-                if px is None:
-                    px = item.get("previousClose", None)
-
-                if px is not None:
-                    prices[t] = float(px)
-                    source[t] = "yahoo quote"
-                    mkt_time = item.get("regularMarketTime", None)
-                    if mkt_time is not None:
-                        ts_used[t] = pd.to_datetime(int(mkt_time), unit="s", utc=True)
-
-            break  # sucesso (mesmo parcial)
-        except Exception:
-            time.sleep(0.4 + 0.4 * attempt)
-
-    price_series = pd.Series(prices, name="preco")
-    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
-    return price_series, meta
-
-@st.cache_data(ttl=300, show_spinner=False)
-def get_prices_cached(tickers_tuple: tuple[str, ...]):
-    return fetch_latest_prices_yahoo_quote(list(tickers_tuple), timeout_s=8)
-
-# ----------------------------
-# Duration loader
-# ----------------------------
-def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
-    try:
-        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None, engine="openpyxl")
-    except Exception:
-        return pd.Series(dtype="float64")
-
-    header_row = None
-    for i, row in raw.iterrows():
-        if any(isinstance(v, str) and "duration" in v.strip().lower() for v in row):
-            header_row = i
-            break
-    if header_row is None:
-        return pd.Series(dtype="float64")
-
-    header_vals = raw.iloc[header_row].tolist()
-    dur_idx = None
-    for j, v in enumerate(header_vals):
-        if isinstance(v, str) and "duration" in v.strip().lower():
-            dur_idx = j
-            break
-    if dur_idx is None:
-        return pd.Series(dtype="float64")
-
-    df = raw.iloc[header_row + 1:].reset_index(drop=True)
-
-    ticker_idx, best_score = None, -1
-    for j in range(df.shape[1]):
-        if j == dur_idx:
-            continue
-        s = df.iloc[:, j].dropna()
-        cnt = 0
-        for x in s:
-            if isinstance(x, str):
-                token = x.strip().upper()
-                if re.fullmatch(r"[A-Z]{3,5}\d{0,2}", token):
-                    cnt += 1
-        if cnt > best_score:
-            best_score, ticker_idx = cnt, j
-
-    if ticker_idx is None:
-        return pd.Series(dtype="float64")
-
-    tickers = df.iloc[:, ticker_idx].astype(str).str.strip().str.upper()
-    durations = pd.to_numeric(df.iloc[:, dur_idx], errors="coerce")
-
-    out = pd.Series(durations.values, index=tickers.values)
-    out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
-    return out
-
-# ----------------------------
-# HTML table
-# ----------------------------
-def build_price_table_html(df: pd.DataFrame) -> str:
-    rows_html = []
-    for _, r in df.iterrows():
-        fonte = sblank(r.get("Fonte"))
-        badge_class = "badge-live" if "quote" in fonte.lower() else "badge-daily"
-        preco = sfloat(r.get("Preço"))
-        ts = sblank(r.get("Timestamp"))
-        dur = sfloat(r.get("Duration"))
-        rows_html.append(
-            "<tr>"
-            f"<td>{sblank(r.get('Ticker'))}</td>"
-            f"<td class='num'>{preco}</td>"
-            f"<td><span class='badge {badge_class}'>{fonte}</span></td>"
-            f"<td>{ts}</td>"
-            f"<td class='num'>{dur}</td>"
-            "</tr>"
-        )
-    return (
-        "<div class='table-wrap'>"
-        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
-        "<table class='styled-table'>"
-        "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
-        "<tbody>" + "".join(rows_html) + "</tbody></table>"
-        "<div class='table-note'>Fonte = Yahoo Finance Quote • Timestamp em horário de Brasília.</div>"
-        "</div>"
+    df = yf.download(
+        tick_str,
+        period="10d",
+        interval="1d",
+        group_by="ticker",
+        auto_adjust=False,
+        actions=False,
+        threads=False,       # MUITO importante no Streamlit Cloud
+        progress=False,
+        session=session,     # usa a sessão com retry
     )
 
-# ----------------------------
-# App
-# ----------------------------
-def main():
-    st.set_page_config(page_title="IRR Real Dashboard", page_icon="📈",
-                       layout="wide", initial_sidebar_state="collapsed")
-
-    st.markdown("""
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
-:root{ --stk-bg:#0e314a; --stk-gold:#BD8A25; --stk-grid:rgba(255,255,255,.12);
-       --stk-note-bg:rgba(255,209,84,.06); --stk-note-bd:rgba(255,209,84,.25); --stk-note-fg:#FFD14F;
-       --stk-header-bg:#ffffff; --stk-header-fg:#0e314a; }
-html, body, [class^="css"]{font-family:Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial, sans-serif;}
-html, body, .stApp,[data-testid="stAppViewContainer"],[data-testid="stDecoration"],
-header[data-testid="stHeader"], header[data-testid="stHeader"] *,[data-testid="stToolbar"], [data-testid="stToolbar"] *{background:var(--stk-bg) !important;}
-header[data-testid="stHeader"]{box-shadow:none !important;}
-.block-container{padding-top:.75rem; padding-bottom:.75rem; max-width:none !important; padding-left:1.25rem; padding-right:1.25rem;}
-.app-header{background:var(--stk-header-bg); padding:18px 20px; border-radius:12px; margin:16px 0 16px; box-shadow:0 1px 0 rgba(0,0,0,.04) inset, 0 6px 20px rgba(0,0,0,.10);}
-.header-inner{position:relative; height:48px; display:flex; align-items:center; justify-content:center;}
-.stk-logo{position:absolute; left:16px; top:50%; transform:translateY(-50%); height:44px; width:auto; filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
-.app-header h1{margin:0; color:var(--stk-header-fg); font-weight:800; letter-spacing:.4px;}
-.footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px; color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
-.table-wrap{margin:14px 0 8px;}
-.table-title{color:#cfe8ff; font-weight:700; margin:0 0 8px; font-size:1.1rem;}
-.styled-table{width:100%; border-collapse:separate; border-spacing:0; background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08); border-radius:12px; overflow:hidden;}
-.styled-table thead th{background:rgba(255,255,255,.06); color:#fff; text-align:left; padding:12px 14px; font-weight:600; border-bottom:1px solid rgba(255,255,255,.08);}
-.styled-table tbody td{color:#fff; padding:12px 14px; border-bottom:1px solid rgba(255,255,255,.06);}
-.styled-table tbody tr:nth-child(even){background:rgba(255,255,255,.02);}
-.styled-table tbody tr:last-child td{border-bottom:none;}
-.styled-table td.num{text-align:right; font-variant-numeric:tabular-nums;}
-.badge{display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem; border:1px solid transparent;}
-.badge-live{background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25);}
-.badge-daily{background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25);}
-.table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
-svg text{font-family:Inter, system-ui, sans-serif !important;}
-</style>
-""", unsafe_allow_html=True)
-
-    LOGO_PATH = "STKGRAFICO.png"
-    logo_b64 = None
-    if os.path.exists(LOGO_PATH):
-        with open(LOGO_PATH, "rb") as f:
-            logo_b64 = base64.b64encode(f.read()).decode("utf-8")
-
-    if logo_b64:
-        st.markdown(
-            "<div class='app-header'><div class='header-inner'>"
-            f"<img class='stk-logo' src='data:image/png;base64,{logo_b64}' alt='STK'/>"
-            "<h1>IRR Real</h1>"
-            "</div></div>",
-            unsafe_allow_html=True,
-        )
-    else:
-        st.markdown(
-            "<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>",
-            unsafe_allow_html=True,
-        )
-
-    try:
-        tickers_for_prices = [
-            "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA3","AXIA6","AXIA7",
-        ]
-
-        # Botão simples p/ refresh (limpa cache)
-        col1, col2 = st.columns([1, 6])
-        with col1:
-            if st.button("🔄 Atualizar"):
-                get_prices_cached.clear()
-
-        with st.spinner("Baixando preços do Yahoo Finance (timeout ~8s)..."):
-            prices_series, meta = get_prices_cached(tuple(tickers_for_prices))
-
-        # Se tudo vier NaN, não trava: mostra aviso e segue (tabela N/A)
-        if prices_series.isna().all():
-            st.warning("Não consegui obter preços do Yahoo agora (provável rate-limit/bloqueio temporário no Cloud).")
-
-        prices = prices_series.astype(float)
-
-        # ====== Shares ======
-        shares_classes = {
-            "CPLE3": 2_982_810_590,
-            "IGTI3": 770_992_429,
-            "IGTI4": 435_368_756,
-            "ENGI3": 887_231_247,
-            "ENGI4": 1_402_193_416,
-            "ENGI11": 502_800_000,
-            "EQTL3": 1_255_510_000,
-            "SBSP3": 683_510_000,
-            "NEOE3": 1_213_800_000,
-            "ENEV3": 1_936_970_000,
-            "ELET3": 2_308_630_000,
-            "EGIE3": 1_142_300_000,
-            "MULT3": 513_164_000,
-            "ALOS3": 542_937_000,
-            "AXIA3": 2_028_500_000,
-            "AXIA6": 279_000_000,
-            "AXIA7": 606_750_000,
-        }
-        shares_series = pd.Series(shares_classes).reindex(prices.index)
-        mc_raw = prices * shares_series
-
-        # ====== Consolidações (ENGI11) ======
-        THRESH_ENGI_MIN_IRR_PCT = 4.0
-
-        engi11_price  = prices.get("ENGI11", np.nan)
-        engi11_shares = shares_series.get("ENGI11", np.nan)
-        cap_11 = (
-            engi11_price * engi11_shares
-            if (pd.notna(engi11_price) and pd.notna(engi11_shares) and engi11_price > 0)
-            else np.nan
-        )
-
-        cap_34 = np.nan
-        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
-            cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
-
-        if pd.notna(cap_11):
-            engi_total = cap_11
-            engi_calc_source = "ENGI11 price × ENGI11 shares (cap_11)"
-            engi_method_cap11 = True
-        else:
-            engi_total = cap_34 if pd.notna(cap_34) else np.nan
-            engi_calc_source = "sem cap_11 (fallback cap_34)"
-            engi_method_cap11 = False
-
-        # IGTI total (ticker sintético IGTI11)
-        if {"IGTI3","IGTI4"}.issubset(mc_raw.index):
-            igti_total = mc_raw["IGTI3"] + mc_raw["IGTI4"]
-        else:
-            igti_total = np.nan
-
-        # ====== Tabela final (para XIRR) ======
-        final_tickers = [
-            "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
-        ]
-
-        rows = []
-        for t in final_tickers:
-            if t == "IGTI11":
-                price = np.nan
-                shares = shares_classes["IGTI3"] + shares_classes["IGTI4"]
-                mc = igti_total
-
-            elif t == "ENGI11":
-                price = prices.get("ENGI11", np.nan)
-                shares = shares_classes["ENGI11"]
-                mc = engi_total
-
-            elif t == "AXIA6":
-                # MC_AXIA6 = AXIA6 + AXIA3 + AXIA7
-                price_axia6 = prices.get("AXIA6", np.nan)
-                shares_axia6 = shares_series.get("AXIA6", np.nan)
-                price_axia3 = prices.get("AXIA3", np.nan)
-                shares_axia3 = shares_series.get("AXIA3", np.nan)
-                price_axia7 = prices.get("AXIA7", np.nan)
-                shares_axia7 = shares_series.get("AXIA7", np.nan)
-
-                price = price_axia6
-
-                if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7]):
-                    shares = shares_axia6 + shares_axia3 + shares_axia7
+    # MultiIndex quando vem mais de 1 ticker
+    if isinstance(df.columns, pd.MultiIndex):
+        for t in tickers:
+            try:
+                if (t, "Close") in df.columns:
+                    s = df[(t, "Close")].dropna()
+                    prices[t] = float(s.iloc[-1]) if len(s) else None
+                    stamps[t] = s.index[-1] if len(s) else None
                 else:
-                    shares = np.nan
+                    prices[t], stamps[t] = None, None
+            except Exception:
+                prices[t], stamps[t] = None, None
+    else:
+        # 1 ticker só
+        s = df["Close"].dropna() if "Close" in df.columns else pd.Series(dtype=float)
+        t = tickers[0]
+        prices[t] = float(s.iloc[-1]) if len(s) else None
+        stamps[t] = s.index[-1] if len(s) else None
 
-                parts = []
-                if pd.notna(price_axia6) and pd.notna(shares_axia6):
-                    parts.append(price_axia6 * shares_axia6)
-                if pd.notna(price_axia3) and pd.notna(shares_axia3):
-                    parts.append(price_axia3 * shares_axia3)
-                if pd.notna(price_axia7) and pd.notna(shares_axia7):
-                    parts.append(price_axia7 * shares_axia7)
-                mc = sum(parts) if parts else np.nan
+    return prices, stamps
 
-            else:
-                price = prices.get(t, np.nan)
-                shares = shares_series.get(t, np.nan)
-                mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
+# ------------------------------
+# Cache: evita martelar o Yahoo a cada rerun
+# ------------------------------
+@st.cache_data(ttl=300, show_spinner=False)  # 5 minutos
+def fetch_prices_yahoo_cached(tickers: tuple[str, ...]) -> tuple[dict, dict, str]:
+    _init_yf_cache_dir()
+    session = _build_requests_session()
 
-            rows.append({"ticker": t, "price": price, "shares": shares, "market_cap": mc})
+    # 3 tentativas com backoff (caso venha HTML/vazio)
+    last_err = ""
+    for attempt in range(3):
+        try:
+            prices, stamps = _download_batch_last_close(list(tickers), session=session)
 
-        resultado = pd.DataFrame(rows).set_index("ticker")
-        resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
+            # se ao menos 1 preço veio, consideramos sucesso parcial
+            if any(v is not None for v in prices.values()):
+                return prices, stamps, ""
 
-        # ====== Excel dos fluxos ======
-        df = pd.read_excel("irrdash3.xlsx", engine="openpyxl")
-        df.columns = df.iloc[0]
-        df = df.iloc[1:]
+            last_err = "Sem preços válidos (provável rate-limit/bloqueio)."
+        except Exception as e:
+            last_err = repr(e)
 
-        for t in resultado.index:
-            if t not in df.columns:
-                df[t] = np.nan
+        # backoff + jitter
+        time.sleep((1.2 * (2 ** attempt)) + random.random())
 
-        target_row = df.index[0]
-        today = datetime.now().date()
+    return {}, {}, last_err
 
-        for t in resultado.index:
-            mc_val = resultado.loc[t, "market_cap"]
-            df.loc[target_row, t] = -float(abs(mc_val)) if pd.notna(mc_val) else np.nan
+# ------------------------------
+# Helper p/ manter última leitura boa na tela (UX)
+# ------------------------------
+def get_prices_with_session_state(tickers: list[str]) -> tuple[dict, dict, str]:
+    prices, stamps, err = fetch_prices_yahoo_cached(tuple(tickers))
 
-        for t in resultado.index:
-            df[t] = pd.to_numeric(df[t], errors="coerce")
+    if prices and any(v is not None for v in prices.values()):
+        st.session_state["last_prices"] = prices
+        st.session_state["last_stamps"] = stamps
+        st.session_state["last_err"] = ""
+        return prices, stamps, ""
+    else:
+        # fallback: mostra último resultado bom em vez de tela vazia
+        lp = st.session_state.get("last_prices", {})
+        ls = st.session_state.get("last_stamps", {})
+        le = st.session_state.get("last_err", err or "Falha ao buscar preços.")
+        return lp, ls, (err or le)
 
-        # ====== XIRR ======
-        irr_results = {}
-        for t in resultado.index:
-            series_cf = df[t].dropna()
-            if series_cf.empty:
-                irr_results[t] = np.nan
-                continue
-            cashflows = series_cf.values.astype(float).copy()
-            n_periods = len(cashflows)
-            dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
-            irr_results[t] = compute_xirr(cashflows, dates_list)
+# ------------------------------
+# EXEMPLO de uso no seu main()
+# ------------------------------
+def build_price_table(tickers_raw: list[str], durations_map: dict[str, float]) -> pd.DataFrame:
+    prices, stamps, err = get_prices_with_session_state(tickers_raw)
 
-        ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
-        ytm_df["irr_aj"] = ytm_df["irr"]
+    rows = []
+    for raw in tickers_raw:
+        t_yf = _normalize_b3(raw)
+        p = prices.get(t_yf)
+        ts = stamps.get(t_yf)
 
-        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
-        for t in ["MULT3","ALOS3","IGTI11"]:
-            if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
-                ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
+        rows.append({
+            "Ticker": raw,
+            "Preço": None if p is None else float(p),
+            "Fonte": "Yahoo Finance",
+            "Timestamp": "" if ts is None or pd.isna(ts) else pd.to_datetime(ts).strftime("%Y-%m-%d"),
+            "Duration": durations_map.get(raw),
+        })
 
-        ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
+    df = pd.DataFrame(rows)
 
-        # ====== Regras de exibição no gráfico ======
-        drop_list = ["ELET3", "ELET6"]
+    if err:
+        st.warning(f"Yahoo/yfinance falhou agora (provável rate-limit/bloqueio). "
+                   f"Estou exibindo o último resultado bom em cache. Detalhe: {err}")
 
-        if "ENGI11" in ytm_clean.index:
-            engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
-        else:
-            engi_irr_pct = np.nan
+    return df
 
-        show_engi11 = (engi_method_cap11 is True) and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
-        if not show_engi11:
-            drop_list.append("ENGI11")
+def main():
+    st.set_page_config(page_title="IRR Real", layout="wide")
 
-        ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
+    # Botão p/ forçar refresh (limpa cache)
+    if st.button("Atualizar"):
+        st.cache_data.clear()
 
-        # ====== Gráfico ======
-        if len(ytm_plot) == 0:
-            st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
-        else:
-            plot_data = pd.DataFrame({
-                "empresa": ytm_plot.index,
-                "irr": (ytm_plot["irr_aj"] * 100).round(2),
-            }).reset_index(drop=True)
+    # Exemplo: seus tickers (substitua pela sua lista)
+    tickers_raw = ["ENGI11", "NEOE3", "EQTL3", "SBSP3", "ALOS3", "MULT3"]
 
-            cor_ouro = "rgb(201,140,46)"
-            bar_colors = [cor_ouro for _ in plot_data["empresa"]]
+    # Exemplo: durations (substitua pelo seu dicionário)
+    durations_map = {"ENGI11": 14.43, "NEOE3": 12.53, "EQTL3": 12.52, "SBSP3": 12.16, "ALOS3": 11.20, "MULT3": 11.01}
 
-            fig = go.Figure(go.Bar(
-                x=plot_data["empresa"], y=plot_data["irr"],
-                text=[f"{v:.2f}%" for v in plot_data["irr"]],
-                marker=dict(color=bar_colors, line=dict(width=0)),
-                hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
-            ))
-            fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
+    with status_or_spinner("Baixando preços do Yahoo Finance (com retry + cache)..."):
+        df_prices = build_price_table(tickers_raw, durations_map)
 
-            irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
-            irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
-            ymin = min(4.0, irr_min - 1.0)
-            ymax = max(12.0, irr_max * 1.10)
-
-            fig.update_layout(
-                bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
-                uniformtext_minsize=10,
-                font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
-                xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
-                           showgrid=False, showline=False, zeroline=False),
-                yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1,
-                           gridcolor="rgba(255,255,255,.12)", zeroline=False,
-                           tickfont=dict(color="white")),
-                margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        # ====== Duration ======
-        duration_map = load_duration_map("irrdash3.xlsx", "duration").copy()
-
-        # ====== Tabela de preços + Duration ======
-        order = [
-            "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA3","AXIA6","AXIA7"
-        ]
-        tbl = pd.DataFrame({"Preço": prices.reindex(order)})
-        tbl["Fonte"] = meta["Fonte"].reindex(order)
-        tbl["Timestamp"] = meta["Timestamp"].reindex(order).map(_to_brt)
-        tbl = tbl.rename_axis("Ticker").reset_index()
-        tbl["Duration"] = tbl["Ticker"].map(duration_map)
-        tbl["__dur_num"] = pd.to_numeric(tbl["Duration"], errors="coerce")
-        tbl = tbl.sort_values(by="__dur_num", ascending=False, na_position="last").drop(columns="__dur_num")
-        st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
-
-        engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
-        st.markdown(
-            "<div class='footer-note'>💡 Para pegar os preços mais recentes e a XIRR mais atualizada, clique em Atualizar</div>",
-            unsafe_allow_html=True
-        )
-        st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
-
-    except Exception as e:
-        st.error(f"❌ Erro: {str(e)}")
+    st.subheader("Preços usados (Yahoo Finance)")
+    st.dataframe(df_prices, use_container_width=True)
 
 if __name__ == "__main__":
     main()
+
+
 
 
 
