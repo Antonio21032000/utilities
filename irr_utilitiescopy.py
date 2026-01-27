@@ -1,3 +1,4 @@
+
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -452,10 +453,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices_series = cached_prices.reindex(tickers_for_prices)
         meta = cached_meta.reindex(tickers_for_prices)
 
-        # (AJUSTE) banner com contraste bom
+        # (AJUSTE) texto atualizado
         st.markdown(
             "<div class='cache-banner'>"
-            "Mostrando <b>últimos preços salvos</b>. Clique em <b>“Atualizar preços agora”</b> para tentar pegar os mais recentes."
+            "Mostrando <b>últimos preços salvos</b>. Clique em <b>“Atualizar preços agora”</b> para pegar os mais recentes."
             "</div>",
             unsafe_allow_html=True
         )
@@ -734,7 +735,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
