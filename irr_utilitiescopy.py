@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -7,10 +6,9 @@ import plotly.graph_objects as go
 from datetime import datetime, date, time as dtime
 import base64, os, re
 from pathlib import Path
-import time, random
-
-# ⚠️ se der erro "No module named requests", adicione "requests" no requirements.txt
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 # ---------- Finance helpers ----------
 try:
@@ -25,6 +23,36 @@ try:
     yf.set_tz_cache_location(str(cache_dir))
 except Exception:
     pass
+
+# ---------- Session HTTP (menos bloqueio + menos pool full) ----------
+def build_http_session() -> requests.Session:
+    s = requests.Session()
+    s.headers.update({
+        # User-Agent “de browser” ajuda a reduzir bloqueio/challenge
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/122.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Connection": "keep-alive",
+    })
+
+    retry = Retry(
+        total=3, connect=3, read=3,
+        backoff_factor=0.6,
+        status_forcelist=[429, 500, 502, 503, 504],
+        allowed_methods=["GET", "POST"]
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=50, pool_maxsize=50)
+    s.mount("https://", adapter)
+    s.mount("http://", adapter)
+    return s
+
+@st.cache_resource
+def get_http_session():
+    return build_http_session()
 
 # --- Helpers seguros contra NA/NaT ---
 def _isna(x):
@@ -74,7 +102,6 @@ def compute_irr(cashflows: np.ndarray) -> float:
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     if len(cashflows) != len(dates):
         return np.nan
-
     values = np.asarray(cashflows, dtype=float)
     dates = pd.to_datetime(list(dates), errors="coerce")
     if dates.isna().any():
@@ -107,61 +134,14 @@ def cap_to_first_digits_mln(value, digits=6):
     return int(str(int(total_mln))[:digits])
 
 # ---------- Helpers de horário ----------
-def _within_b3_session(now_local: datetime) -> bool:
-    # heurística simples (evita intraday fora do pregão)
+def within_b3_session(now_local: datetime) -> bool:
+    # heurística simples: 10:05–18:05 (BRT)
     t = now_local.time()
     return dtime(10, 5) <= t <= dtime(18, 5)
 
-# ---------- BRAPI (fallback) ----------
-def brapi_quote(ticker: str, session: requests.Session, token: str | None = None):
-    """
-    Retorna (price, timestamp_utc) ou (np.nan, None)
-    """
-    try:
-        url = f"https://brapi.dev/api/quote/{ticker}"
-        params = {}
-        if token:
-            params["token"] = token
-        r = session.get(url, params=params, timeout=10)
-        if r.status_code != 200:
-            return np.nan, None
-        data = r.json()
-        results = data.get("results") or []
-        if not results:
-            return np.nan, None
-        row = results[0]
-
-        # preço: tenta alguns campos comuns
-        price = row.get("regularMarketPrice")
-        if price is None:
-            price = row.get("price")
-        if price is None:
-            price = row.get("regularMarketPreviousClose")
-        if price is None:
-            return np.nan, None
-
-        # timestamp: regularMarketTime (epoch seconds) costuma vir
-        ts = row.get("regularMarketTime")
-        ts_utc = None
-        if isinstance(ts, (int, float)) and ts > 0:
-            ts_utc = pd.to_datetime(int(ts), unit="s", utc=True)
-
-        return float(price), ts_utc
-    except Exception:
-        return np.nan, None
-
-# ---------- Yahoo Finance (try-first) ----------
 def _extract_close_df(raw) -> pd.DataFrame:
-    """
-    Normaliza retorno do yfinance.download e devolve DataFrame de Close (colunas = tickers).
-    """
-    if raw is None:
+    if raw is None or not isinstance(raw, pd.DataFrame) or raw.empty:
         return pd.DataFrame()
-    if isinstance(raw, pd.DataFrame) and raw.empty:
-        return pd.DataFrame()
-    if not isinstance(raw, pd.DataFrame):
-        return pd.DataFrame()
-
     try:
         close = raw["Close"]
     except Exception:
@@ -172,12 +152,11 @@ def _extract_close_df(raw) -> pd.DataFrame:
                 return pd.DataFrame()
         else:
             return pd.DataFrame()
-
     if isinstance(close, pd.Series):
         close = close.to_frame()
     return close
 
-def _yf_download_close(tickers_sa, period, interval=None):
+def _yf_download_close(tickers_sa, period, interval=None, session=None) -> pd.DataFrame:
     raw = yf.download(
         tickers_sa,
         period=period,
@@ -185,144 +164,78 @@ def _yf_download_close(tickers_sa, period, interval=None):
         progress=False,
         group_by="column",
         auto_adjust=False,
-        threads=False,  # CRÍTICO no cloud
+        threads=False,        # 🔥 CRÍTICO: evita avalanche de conexões
+        session=session,      # 🔥 session com UA + pool + retry
     )
-    close = _extract_close_df(raw).ffill()
-    if close.empty or close.dropna(how="all").empty:
+    close = _extract_close_df(raw)
+    if close.empty:
         return pd.DataFrame()
+    close = close.ffill()
     close = close.loc[:, ~close.columns.duplicated()]
+    if close.dropna(how="all").empty:
+        return pd.DataFrame()
     return close
 
-def _yf_try_one(ticker_sa: str, allow_intraday: bool):
-    """
-    Tenta Yahoo para 1 ticker (intraday->daily). Retorna (price, ts, fonte).
-    """
-    # intraday
-    if allow_intraday:
-        try:
-            c1 = _yf_download_close([ticker_sa], period="1d", interval="1m")
-            if not c1.empty:
-                ts = c1.dropna(how="all").index.max()
-                if ts is not None and pd.notna(ts) and ticker_sa in c1.columns:
-                    v = c1.at[ts, ticker_sa]
-                    if pd.notna(v):
-                        return float(v), ts, "intraday 1m (YF)"
-        except Exception:
-            pass
-
-    # daily
-    try:
-        cd = _yf_download_close([ticker_sa], period="5d", interval=None)
-        if not cd.empty:
-            ts = cd.dropna(how="all").index.max()
-            if ts is not None and pd.notna(ts) and ticker_sa in cd.columns:
-                v = cd.at[ts, ticker_sa]
-                if pd.notna(v):
-                    return float(v), ts, "daily close (YF)"
-    except Exception:
-        pass
-
-    return np.nan, None, None
-
-# ---------- Prices: YF per asset, fallback BRAPI ----------
-@st.cache_data(ttl=600, show_spinner=False)  # 10 min
-def fetch_latest_prices_yf_then_brapi(tickers: tuple[str, ...]):
-    """
-    Regra:
-    1) tenta Yahoo Finance (bulk), e se ficar NaN:
-    2) tenta Yahoo Finance individualmente por ticker,
-    3) se ainda falhar, busca no BRAPI.
-    """
+# ---------- Prices (Yahoo only, robusto) ----------
+@st.cache_data(ttl=900, show_spinner=False)  # 15 min (menos rerun = menos bloqueio)
+def fetch_latest_prices_yahoo_only(tickers: tuple[str, ...]):
     tickers = list(tickers)
     tickers_sa = [f"{t}.SA" for t in tickers]
 
+    session = get_http_session()
     now = datetime.now()
-    allow_intraday = _within_b3_session(now)
+    allow_intraday = within_b3_session(now)
 
     prices, source, ts_used = {}, {}, {}
 
-    # Token opcional do BRAPI (se você tiver)
-    brapi_token = None
-    try:
-        brapi_token = st.secrets.get("BRAPI_TOKEN", None)
-    except Exception:
-        brapi_token = None
-    if not brapi_token:
-        brapi_token = os.getenv("BRAPI_TOKEN")
-
-    sess = requests.Session()
-
-    # 1) tenta YF bulk primeiro (bem mais leve que 17 calls)
-    intraday = pd.DataFrame()
+    # 1) Primeiro tenta DAILY (mais leve e “menos bloqueado”)
     daily = pd.DataFrame()
-
-    # bulk intraday
-    if allow_intraday:
-        try:
-            intraday = _yf_download_close(tickers_sa, period="1d", interval="1m")
-        except Exception:
-            intraday = pd.DataFrame()
-
-    # bulk daily
     try:
-        daily = _yf_download_close(tickers_sa, period="5d", interval=None)
+        daily = _yf_download_close(tickers_sa, period="5d", interval=None, session=session)
     except Exception:
         daily = pd.DataFrame()
 
-    ts1m = None
-    if not intraday.empty:
-        tmp = intraday.dropna(how="all")
-        ts1m = tmp.index.max() if not tmp.empty else None
-        if ts1m is not None and pd.isna(ts1m):
-            ts1m = None
+    # 2) Intraday só no pregão e usando 5m (bem menos agressivo que 1m)
+    intraday = pd.DataFrame()
+    if allow_intraday:
+        try:
+            intraday = _yf_download_close(tickers_sa, period="1d", interval="5m", session=session)
+        except Exception:
+            intraday = pd.DataFrame()
 
-    tsd = None
-    if not daily.empty:
-        tmp = daily.dropna(how="all")
-        tsd = tmp.index.max() if not tmp.empty else None
-        if tsd is not None and pd.isna(tsd):
-            tsd = None
+    # função: pega último valor válido por ticker
+    def pick_last(df: pd.DataFrame, col: str):
+        if df is None or df.empty or col not in df.columns:
+            return np.nan, None
+        s = df[col].dropna()
+        if s.empty:
+            return np.nan, None
+        ts = s.index[-1]
+        v = s.iloc[-1]
+        if pd.isna(ts) or pd.isna(v):
+            return np.nan, None
+        return float(v), ts
 
-    # 2) resolve ticker a ticker: YF bulk -> YF individual -> BRAPI
     for t, tsa in zip(tickers, tickers_sa):
-        val, used_ts, used_src = np.nan, None, None
+        val, ts, src = np.nan, None, None
 
-        # (a) Yahoo bulk intraday
-        if allow_intraday and ts1m is not None and (tsa in getattr(intraday, "columns", [])) and (ts1m in intraday.index):
-            v = intraday.at[ts1m, tsa]
-            if pd.notna(v):
-                val = float(v); used_ts = ts1m; used_src = "intraday 1m (YF)"
+        # prefere intraday se disponível
+        if not intraday.empty:
+            v1, ts1 = pick_last(intraday, tsa)
+            if pd.notna(v1):
+                val, ts, src = v1, ts1, "intraday 5m (YF)"
 
-        # (b) Yahoo bulk daily
-        if pd.isna(val) and tsd is not None and (tsa in getattr(daily, "columns", [])) and (tsd in daily.index):
-            v = daily.at[tsd, tsa]
-            if pd.notna(v):
-                val = float(v); used_ts = tsd; used_src = "daily close (YF)"
-
-        # (c) Yahoo individual (como você pediu: tenta por ativo)
-        if pd.isna(val):
-            v2, ts2, src2 = _yf_try_one(tsa, allow_intraday=allow_intraday)
+        # fallback daily
+        if pd.isna(val) and not daily.empty:
+            v2, ts2 = pick_last(daily, tsa)
             if pd.notna(v2):
-                val = float(v2); used_ts = ts2; used_src = src2
-
-        # (d) BRAPI fallback
-        if pd.isna(val):
-            v3, ts3 = brapi_quote(t, session=sess, token=brapi_token)
-            if pd.notna(v3):
-                val = float(v3)
-                used_ts = ts3  # utc Timestamp or None
-                used_src = "BRAPI"
+                val, ts, src = v2, ts2, "daily close (YF)"
 
         prices[t] = val
-        source[t] = used_src if used_src else "N/A"
-        ts_used[t] = used_ts
+        source[t] = src if src else "N/A"
+        ts_used[t] = ts
 
-        # pequena pausa pra não martelar (especialmente se YF estiver “chato”)
-        time.sleep(0.05 + random.random() * 0.03)
-
-    price_series = pd.Series(prices, name="preco")
-    meta = pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
-    return price_series, meta
+    return pd.Series(prices, name="preco"), pd.DataFrame({"Fonte": pd.Series(source), "Timestamp": pd.Series(ts_used)})
 
 # ---------- Duration loader ----------
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
@@ -372,15 +285,10 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
 
 # ---------- Helpers de formatação ----------
 def format_ts_brt(ts) -> str:
-    """
-    Robusto: nunca quebra.
-    Se vier None/NaT, retorna "".
-    """
     t = pd.to_datetime(ts, errors="coerce")
     if pd.isna(t):
         return ""
     try:
-        # se vier UTC (brapi), já tem tz; se vier naive (yf), assume UTC
         if getattr(t, "tzinfo", None) is None:
             t = t.tz_localize("UTC")
         t = t.tz_convert("America/Sao_Paulo")
@@ -392,8 +300,7 @@ def build_price_table_html(df: pd.DataFrame) -> str:
     rows_html = []
     for _, r in df.iterrows():
         fonte = sblank(r.get("Fonte"))
-        fonte_low = fonte.lower()
-        badge_class = "badge-live" if ("intraday" in fonte_low) else ("badge-brapi" if "brapi" in fonte_low else "badge-daily")
+        badge_class = "badge-live" if "intraday" in fonte.lower() else "badge-daily"
         preco = sfloat(r.get("Preço"))
         ts = sblank(r.get("Timestamp"))
         dur = sfloat(r.get("Duration"))
@@ -408,11 +315,11 @@ def build_price_table_html(df: pd.DataFrame) -> str:
         )
     return (
         "<div class='table-wrap'>"
-        "<div class='table-title'>🕒 Preços usados (Yahoo Finance / BRAPI)</div>"
+        "<div class='table-title'>🕒 Preços usados (Yahoo Finance)</div>"
         "<table class='styled-table'>"
         "<thead><tr><th>Ticker</th><th>Preço</th><th>Fonte</th><th>Timestamp</th><th>Duration</th></tr></thead>"
         "<tbody>" + "".join(rows_html) + "</tbody></table>"
-        "<div class='table-note'>Prioridade: Yahoo (intraday/daily) → Yahoo individual → BRAPI fallback • Timestamp em horário de Brasília.</div>"
+        "<div class='table-note'>Menos agressivo: intraday 5m (só no pregão) → daily close • Timestamp em horário de Brasília.</div>"
         "</div>"
     )
 
@@ -448,7 +355,6 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .badge{display:inline-block; padding:4px 8px; border-radius:999px; font-size:.85rem; border:1px solid transparent;}
 .badge-live{background:#1f6f5f; color:#d3fff1; border-color:rgba(211,255,241,.25);}
 .badge-daily{background:#6f5f1f; color:#fff3c2; border-color:rgba(255,243,194,.25);}
-.badge-brapi{background:#1f3a6f; color:#d7e6ff; border-color:rgba(215,230,255,.25);}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
@@ -482,19 +388,17 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "MULT3","ALOS3","AXIA3","AXIA6","AXIA7",
         ]
 
-        # ====== Preços (YF -> BRAPI) ======
-        with st.spinner("Buscando preços (Yahoo Finance; fallback BRAPI)…"):
-            prices_series, meta = fetch_latest_prices_yf_then_brapi(tuple(tickers_for_prices))
+        # ====== Preços (Yahoo only) ======
+        with st.spinner("Buscando preços (Yahoo Finance)…"):
+            prices_series, meta = fetch_latest_prices_yahoo_only(tuple(tickers_for_prices))
         prices = prices_series.astype(float)
 
-        # diagnóstico rápido (sem quebrar o app)
         n_ok = int(prices.notna().sum())
         if n_ok == 0:
-            st.warning("Não consegui obter preços nem do Yahoo nem do BRAPI. Provável bloqueio/instabilidade temporária.")
-        else:
-            n_brapi = int((meta["Fonte"].astype(str).str.upper() == "BRAPI").sum())
-            n_yf = int((meta["Fonte"].astype(str).str.contains("YF", na=False)).sum())
-            st.caption(f"Preços OK: {n_ok}/{len(prices)} • Yahoo: {n_yf} • BRAPI fallback: {n_brapi}")
+            st.warning(
+                "Não consegui obter preços do Yahoo. Isso costuma ser bloqueio/rate-limit do Yahoo "
+                "(muito comum no Streamlit Cloud por IP compartilhado)."
+            )
 
         # ====== Shares ======
         shares_classes = {
@@ -568,7 +472,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 mc = engi_total
 
             elif t == "AXIA6":
-                # MC_AXIA6 = AXIA6 + AXIA3 + AXIA7
                 price_axia6 = prices.get("AXIA6", np.nan)
                 shares_axia6 = shares_series.get("AXIA6", np.nan)
                 price_axia3 = prices.get("AXIA3", np.nan)
@@ -634,14 +537,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
         for t in ["MULT3","ALOS3","IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
-        # ====== Regras de exibição no gráfico ======
         drop_list = ["ELET3", "ELET6"]
 
         if "ENGI11" in ytm_clean.index:
@@ -655,7 +556,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
 
-        # ====== Gráfico ======
         if len(ytm_plot) == 0:
             st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
         else:
@@ -675,8 +575,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             ))
             fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
 
-            irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
-            irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
+            irr_min = float(plot_data["irr"].min())
+            irr_max = float(plot_data["irr"].max())
             ymin = min(4.0, irr_min - 1.0)
             ymax = max(12.0, irr_max * 1.10)
 
@@ -706,7 +606,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if pd.notna(v):
                 set_if_missing("ENGI3", v); set_if_missing("ENGI4", v)
 
-        # ====== Tabela de preços + Duration ======
+        # ====== Tabela ======
         order = [
             "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
             "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
