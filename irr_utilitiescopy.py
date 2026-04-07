@@ -1,4 +1,3 @@
-
 import streamlit as st
 import yfinance as yf
 import pandas as pd
@@ -30,6 +29,7 @@ CACHE_DIR = tempfile.gettempdir()
 LAST_PRICES_PATH = os.path.join(CACHE_DIR, "last_prices.pkl")
 LAST_META_PATH = os.path.join(CACHE_DIR, "last_prices_meta.pkl")
 
+
 # =========================================================
 # Helpers seguros contra NA/NaT
 # =========================================================
@@ -39,8 +39,10 @@ def _isna(x):
     except Exception:
         return x is None
 
+
 def sblank(x: object) -> str:
     return "" if _isna(x) else str(x)
+
 
 def sfloat(x: object, nd: int = 2) -> str:
     if _isna(x):
@@ -49,6 +51,7 @@ def sfloat(x: object, nd: int = 2) -> str:
         return f"{float(x):.{nd}f}"
     except Exception:
         return sblank(x)
+
 
 # =========================================================
 # IRR helpers
@@ -81,6 +84,7 @@ def compute_irr(cashflows: np.ndarray) -> float:
             low, f_low = mid, f_mid
     return mid
 
+
 def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> float:
     if len(cashflows) != len(dates):
         return np.nan
@@ -112,6 +116,7 @@ def compute_xirr(cashflows: np.ndarray, dates: list, guess: float = 0.1) -> floa
             return np.nan
     return rate
 
+
 def cap_to_first_digits_mln(value, digits=6):
     try:
         if pd.isna(value):
@@ -120,6 +125,7 @@ def cap_to_first_digits_mln(value, digits=6):
         return int(str(abs(total_mln))[:digits])
     except Exception:
         return np.nan
+
 
 # =========================================================
 # Cache helpers (pickle – sem pyarrow)
@@ -139,12 +145,14 @@ def load_last_prices():
             return None, None
     return None, None
 
+
 def save_last_prices(prices: pd.Series, meta: pd.DataFrame):
     try:
         pd.Series(prices, name="preco").to_pickle(LAST_PRICES_PATH)
         meta.to_pickle(LAST_META_PATH)
     except Exception:
         pass
+
 
 # =========================================================
 # Timestamp format
@@ -161,12 +169,25 @@ def format_ts_brt(ts) -> str:
     except Exception:
         return ""
 
+
 # =========================================================
-# Duration loader
+# Excel helpers
 # =========================================================
+def load_cashflow_sheet(excel_path="irrdash3.xlsx", sheet_name=0) -> pd.DataFrame:
+    """
+    Lê a aba principal do Excel de forma compatível com pandas 3.
+    Força dtype=object para evitar colunas StringDtype rígidas e,
+    depois, usa a primeira linha de dados como header real.
+    """
+    raw = pd.read_excel(excel_path, sheet_name=sheet_name, dtype=object)
+    raw.columns = raw.iloc[0]
+    df = raw.iloc[1:].copy()
+    return df
+
+
 def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series:
     try:
-        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None)
+        raw = pd.read_excel(excel_path, sheet_name=sheet, header=None, dtype=object)
     except Exception:
         return pd.Series(dtype="float64")
 
@@ -187,7 +208,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     if dur_idx is None:
         return pd.Series(dtype="float64")
 
-    df = raw.iloc[header_row + 1 :].reset_index(drop=True)
+    df = raw.iloc[header_row + 1:].reset_index(drop=True)
 
     ticker_idx, best_score = None, -1
     for j in range(df.shape[1]):
@@ -212,6 +233,7 @@ def load_duration_map(excel_path="irrdash3.xlsx", sheet="duration") -> pd.Series
     out = pd.Series(durations.values, index=tickers.values)
     out = out[~out.index.isin(["", "NAN", "NONE"])].dropna()
     return out
+
 
 # =========================================================
 # UI table HTML
@@ -243,6 +265,7 @@ def build_price_table_html(df: pd.DataFrame) -> str:
         "</div>"
     )
 
+
 # =========================================================
 # Yahoo fetch (robusto p/ 1 ticker e muitos tickers)
 # =========================================================
@@ -259,21 +282,19 @@ def _yf_download_close(tickers_sa, period, interval, timeout_s=8):
         group_by="column",
         auto_adjust=False,
         actions=False,
-        threads=False,      # importantíssimo no Cloud
-        timeout=timeout_s,  # timeout do requests interno
+        threads=False,
+        timeout=timeout_s,
     )
 
     if not isinstance(df, pd.DataFrame) or df.empty:
         return pd.DataFrame()
 
-    # Caso multiindex (vários tickers)
     if isinstance(df.columns, pd.MultiIndex):
         if "Close" not in df.columns.get_level_values(0):
             return pd.DataFrame()
         close = df["Close"].copy()
         return close.ffill()
 
-    # Caso 1 ticker
     if "Close" in df.columns:
         close = df[["Close"]].copy()
         ticker_name = tickers_sa[0] if len(tickers_sa) >= 1 else "Close"
@@ -282,12 +303,8 @@ def _yf_download_close(tickers_sa, period, interval, timeout_s=8):
 
     return pd.DataFrame()
 
+
 def fetch_prices_yahoo_safe(tickers, max_total_seconds=10):
-    """
-    - Probe rápido para detectar bloqueio geral (sem travar UX).
-    - Depois baixa tudo em 1 chamada (intraday) e fallback (daily).
-    - Timeout duro total via ThreadPoolExecutor.
-    """
     tickers_sa = [f"{t}.SA" for t in tickers]
     probe_ticker = tickers_sa[0] if tickers_sa else "VALE3.SA"
 
@@ -343,6 +360,7 @@ def fetch_prices_yahoo_safe(tickers, max_total_seconds=10):
 
     return prices, meta, "ok"
 
+
 # =========================================================
 # App
 # =========================================================
@@ -396,7 +414,7 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 
-/* ===== Banner de cache (substitui st.info, melhora contraste) ===== */
+/* ===== Banner de cache ===== */
 .cache-banner{
   background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.22);
@@ -433,9 +451,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
     # ====== Tickers ======
     tickers_for_prices = [
-        "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-        "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-        "MULT3","ALOS3","AXIA3","AXIA6","AXIA7",
+        "CPLE3", "IGTI3", "IGTI4", "ENGI3", "ENGI4", "ENGI11",
+        "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
+        "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7",
     ]
 
     # ====== UX: mostra cache IMEDIATO (se existir) ======
@@ -448,12 +466,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     with colB:
         st.caption("Se o Yahoo bloquear, o app não trava: mantém o último cache salvo.")
 
-    # Default: usar cache
     if has_cache:
         prices_series = cached_prices.reindex(tickers_for_prices)
         meta = cached_meta.reindex(tickers_for_prices)
 
-        # (AJUSTE) texto atualizado
         st.markdown(
             "<div class='cache-banner'>"
             "Mostrando <b>últimos preços salvos</b>. Clique em <b>“Atualizar preços agora”</b> para pegar os mais recentes."
@@ -464,7 +480,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices_series = pd.Series(index=tickers_for_prices, dtype="float64", name="preco")
         meta = pd.DataFrame(index=tickers_for_prices, data={"Fonte": "N/A", "Timestamp": pd.NaT})
 
-    # Se não tem cache, faz 1 tentativa automática. Se tem cache, só atualiza se clicar.
     need_fetch = refresh or (not has_cache)
 
     status_box = st.empty()
@@ -488,7 +503,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 msg += " (erro)"
             status_box.warning(msg + " Mantendo o último cache disponível.")
 
-    # A partir daqui, o app sempre segue (cache ou novo)
     try:
         prices = pd.to_numeric(prices_series, errors="coerce").astype(float)
 
@@ -518,7 +532,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Consolidações (ENGI11) ======
         THRESH_ENGI_MIN_IRR_PCT = 4.0
 
-        engi11_price  = prices.get("ENGI11", np.nan)
+        engi11_price = prices.get("ENGI11", np.nan)
         engi11_shares = shares_series.get("ENGI11", np.nan)
         cap_11 = (
             engi11_price * engi11_shares
@@ -527,7 +541,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         )
 
         cap_34 = np.nan
-        if {"ENGI3","ENGI4"}.issubset(mc_raw.index):
+        if {"ENGI3", "ENGI4"}.issubset(mc_raw.index):
             cap_34 = mc_raw["ENGI3"] + mc_raw["ENGI4"]
 
         if pd.notna(cap_11):
@@ -546,8 +560,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Tabela final (para XIRR) ======
         final_tickers = [
-            "CPLE3","EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA6","IGTI11","ENGI11",
+            "CPLE3", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
+            "MULT3", "ALOS3", "AXIA6", "IGTI11", "ENGI11",
         ]
 
         rows = []
@@ -597,22 +611,23 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         resultado["market_cap"] = resultado["market_cap"].apply(cap_to_first_digits_mln)
 
         # ====== Excel dos fluxos ======
-        df = pd.read_excel("irrdash3.xlsx")
-        df.columns = df.iloc[0]
-        df = df.iloc[1:]
+        df = load_cashflow_sheet("irrdash3.xlsx")
 
         for t in resultado.index:
             if t not in df.columns:
                 df[t] = np.nan
 
-        target_row = df.index[0]
-        today = datetime.now().date()
-        for t in resultado.index:
-            v = resultado.loc[t, "market_cap"]
-            df.loc[target_row, t] = -abs(float(v)) if pd.notna(v) else np.nan
-
+        # MUITO IMPORTANTE:
+        # converte as colunas dos tickers para numérico ANTES de escrever o market cap
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
+
+        target_row = df.index[0]
+        today = datetime.now().date()
+
+        for t in resultado.index:
+            v = resultado.loc[t, "market_cap"]
+            df.at[target_row, t] = -abs(float(v)) if pd.notna(v) else np.nan
 
         # ====== XIRR ======
         irr_results = {}
@@ -621,6 +636,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if series_cf.empty:
                 irr_results[t] = np.nan
                 continue
+
             cashflows = series_cf.values.astype(float).copy()
             n_periods = len(cashflows)
             dates_list = [today] + [date(today.year + j - 1, 12, 31) for j in range(1, n_periods)]
@@ -630,14 +646,14 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df["irr_aj"] = ytm_df["irr"]
 
         # Ajuste para IRR real (shopping / real estate, sem AXIA6)
-        for t in ["MULT3","ALOS3","IGTI11"]:
+        for t in ["MULT3", "ALOS3", "IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
 
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
         # ====== Regras de exibição no gráfico ======
-        drop_list = ["ELET3", "ELET6"]
+        drop_list = ["ELET6", "ENGI3", "ENGI4", "IGTI3", "IGTI4", "AXIA3", "AXIA7"]
 
         if "ENGI11" in ytm_clean.index:
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
@@ -663,12 +679,17 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             bar_colors = [cor_ouro for _ in plot_data["empresa"]]
 
             fig = go.Figure(go.Bar(
-                x=plot_data["empresa"], y=plot_data["irr"],
+                x=plot_data["empresa"],
+                y=plot_data["irr"],
                 text=[f"{v:.2f}%" for v in plot_data["irr"]],
                 marker=dict(color=bar_colors, line=dict(width=0)),
                 hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
             ))
-            fig.update_traces(textposition="outside", cliponaxis=False, textfont=dict(color="white", size=14))
+            fig.update_traces(
+                textposition="outside",
+                cliponaxis=False,
+                textfont=dict(color="white", size=14)
+            )
 
             irr_min = float(plot_data["irr"].min()) if len(plot_data) else 0.0
             irr_max = float(plot_data["irr"].max()) if len(plot_data) else 0.0
@@ -676,15 +697,29 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             ymax = max(12.0, irr_max * 1.10)
 
             fig.update_layout(
-                bargap=0.12, plot_bgcolor="#0e314a", paper_bgcolor="#0e314a",
+                bargap=0.12,
+                plot_bgcolor="#0e314a",
+                paper_bgcolor="#0e314a",
                 uniformtext_minsize=10,
                 font=dict(family="Inter, system-ui, sans-serif", color="white", size=14),
-                xaxis=dict(title="Empresas", tickfont=dict(size=12, color="white"),
-                           showgrid=False, showline=False, zeroline=False),
-                yaxis=dict(title="IRR Real (%)", range=[ymin, ymax], dtick=1,
-                           gridcolor="rgba(255,255,255,.12)", zeroline=False,
-                           tickfont=dict(color="white")),
-                margin=dict(l=10, r=10, t=6, b=62), showlegend=False, height=560,
+                xaxis=dict(
+                    title="Empresas",
+                    tickfont=dict(size=12, color="white"),
+                    showgrid=False,
+                    showline=False,
+                    zeroline=False
+                ),
+                yaxis=dict(
+                    title="IRR Real (%)",
+                    range=[ymin, ymax],
+                    dtick=1,
+                    gridcolor="rgba(255,255,255,.12)",
+                    zeroline=False,
+                    tickfont=dict(color="white")
+                ),
+                margin=dict(l=10, r=10, t=6, b=62),
+                showlegend=False,
+                height=560,
             )
             st.plotly_chart(fig, use_container_width=True)
 
@@ -708,9 +743,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         # ====== Tabela de preços + Duration ======
         order = [
-            "CPLE3","IGTI3","IGTI4","ENGI3","ENGI4","ENGI11",
-            "EQTL3","SBSP3","NEOE3","ENEV3","ELET3","EGIE3",
-            "MULT3","ALOS3","AXIA3","AXIA6","AXIA7"
+            "CPLE3", "IGTI3", "IGTI4", "ENGI3", "ENGI4", "ENGI11",
+            "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
+            "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7"
         ]
 
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -733,9 +768,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
 
+
 if __name__ == "__main__":
     main()
-
 
 
 
