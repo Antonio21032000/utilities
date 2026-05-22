@@ -561,7 +561,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Tabela final (para XIRR) ======
         final_tickers = [
             "CPLE3", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-            "MULT3", "ALOS3", "AXIA6", "IGTI11", "ENGI11",
+            "MULT3", "ALOS3", "AXIA3", "IGTI11", "ENGI11",
         ]
 
         rows = []
@@ -576,15 +576,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 shares = shares_classes["ENGI11"]
                 mc = engi_total
 
-            elif t == "AXIA6":
-                price_axia6 = prices.get("AXIA6", np.nan)
-                shares_axia6 = shares_series.get("AXIA6", np.nan)
+            elif t == "AXIA3":
                 price_axia3 = prices.get("AXIA3", np.nan)
                 shares_axia3 = shares_series.get("AXIA3", np.nan)
+                price_axia6 = prices.get("AXIA6", np.nan)
+                shares_axia6 = shares_series.get("AXIA6", np.nan)
                 price_axia7 = prices.get("AXIA7", np.nan)
                 shares_axia7 = shares_series.get("AXIA7", np.nan)
 
-                price = price_axia6
+                price = price_axia3
                 shares = (
                     shares_axia6 + shares_axia3 + shares_axia7
                     if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7])
@@ -645,7 +645,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate, sem AXIA6)
+        # Ajuste para IRR real (shopping / real estate; AXIA3 fica nominal, sem deflacionar)
         for t in ["MULT3", "ALOS3", "IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
@@ -653,7 +653,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_clean = ytm_df[["irr_aj"]].dropna().sort_values("irr_aj", ascending=True)
 
         # ====== Regras de exibição no gráfico ======
-        drop_list = ["ELET6", "ENGI3", "ENGI4", "IGTI3", "IGTI4", "AXIA3", "AXIA7"]
+        drop_list = ["ELET6", "ENGI3", "ENGI4", "IGTI3", "IGTI4", "AXIA6", "AXIA7"]
 
         if "ENGI11" in ytm_clean.index:
             engi_irr_pct = float(ytm_clean.loc["ENGI11", "irr_aj"] * 100.0)
@@ -771,7 +771,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
