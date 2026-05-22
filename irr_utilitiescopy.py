@@ -128,7 +128,7 @@ def cap_to_first_digits_mln(value, digits=6):
 
 
 # =========================================================
-# Cache helpers (pickle – sem pyarrow)
+# Cache helpers
 # =========================================================
 def load_last_prices():
     if os.path.exists(LAST_PRICES_PATH) and os.path.exists(LAST_META_PATH):
@@ -174,11 +174,6 @@ def format_ts_brt(ts) -> str:
 # Excel helpers
 # =========================================================
 def load_cashflow_sheet(excel_path="irrdash3.xlsx", sheet_name=0) -> pd.DataFrame:
-    """
-    Lê a aba principal do Excel de forma compatível com pandas 3.
-    Força dtype=object para evitar colunas StringDtype rígidas e,
-    depois, usa a primeira linha de dados como header real.
-    """
     raw = pd.read_excel(excel_path, sheet_name=sheet_name, dtype=object)
     raw.columns = raw.iloc[0]
     df = raw.iloc[1:].copy()
@@ -267,13 +262,9 @@ def build_price_table_html(df: pd.DataFrame) -> str:
 
 
 # =========================================================
-# Yahoo fetch (robusto p/ 1 ticker e muitos tickers)
+# Yahoo fetch
 # =========================================================
 def _yf_download_close(tickers_sa, period, interval, timeout_s=8):
-    """
-    Retorna um DF apenas com Close, colunas = tickers_sa.
-    Funciona mesmo quando tickers_sa tem 1 item (quando o yfinance devolve colunas 'Close').
-    """
     df = yf.download(
         tickers_sa,
         period=period,
@@ -414,7 +405,6 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
 .table-note{color:#cfe8ff; opacity:.8; font-size:.85rem; margin-top:8px;}
 svg text{font-family:Inter, system-ui, sans-serif !important;}
 
-/* ===== Banner de cache ===== */
 .cache-banner{
   background: rgba(255,255,255,.07);
   border: 1px solid rgba(255,255,255,.22);
@@ -449,14 +439,14 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             unsafe_allow_html=True,
         )
 
-    # ====== Tickers ======
+    # ====== Tickers puxados do Yahoo ======
     tickers_for_prices = [
         "CPLE3", "IGTI3", "IGTI4", "ENGI3", "ENGI4", "ENGI11",
         "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
         "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7",
     ]
 
-    # ====== UX: mostra cache IMEDIATO (se existir) ======
+    # ====== Cache ======
     cached_prices, cached_meta = load_last_prices()
     has_cache = cached_prices is not None and cached_meta is not None
 
@@ -522,14 +512,15 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
-            "AXIA3": 2_635_000_000,
+            "AXIA3": 2_028_500_000,
             "AXIA6": 279_000_000,
             "AXIA7": 606_750_000,
         }
+
         shares_series = pd.Series(shares_classes).reindex(prices.index)
         mc_raw = prices * shares_series
 
-        # ====== Consolidações (ENGI11) ======
+        # ====== Consolidação ENGI11 ======
         THRESH_ENGI_MIN_IRR_PCT = 4.0
 
         engi11_price = prices.get("ENGI11", np.nan)
@@ -553,12 +544,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             engi_calc_source = "sem cap_11 (fallback apenas p/ tabela)"
             engi_method_cap11 = False
 
-        # IGTI total (ticker sintético IGTI11)
+        # IGTI total sintético
         igti_total = mc_raw.get("IGTI3", np.nan) + mc_raw.get("IGTI4", np.nan)
         if pd.isna(igti_total):
             igti_total = np.nan
 
-        # ====== Tabela final (para XIRR) ======
+        # ====== Tabela final para XIRR ======
         final_tickers = [
             "CPLE3", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
             "MULT3", "ALOS3", "AXIA3", "IGTI11", "ENGI11",
@@ -577,28 +568,11 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 mc = engi_total
 
             elif t == "AXIA3":
-                price_axia3 = prices.get("AXIA3", np.nan)
-                shares_axia3 = shares_series.get("AXIA3", np.nan)
-                price_axia6 = prices.get("AXIA6", np.nan)
-                shares_axia6 = shares_series.get("AXIA6", np.nan)
-                price_axia7 = prices.get("AXIA7", np.nan)
-                shares_axia7 = shares_series.get("AXIA7", np.nan)
-
-                price = price_axia3
-                shares = (
-                    shares_axia6 + shares_axia3 + shares_axia7
-                    if all(pd.notna(v) for v in [shares_axia6, shares_axia3, shares_axia7])
-                    else np.nan
-                )
-
-                parts = []
-                if pd.notna(price_axia6) and pd.notna(shares_axia6):
-                    parts.append(price_axia6 * shares_axia6)
-                if pd.notna(price_axia3) and pd.notna(shares_axia3):
-                    parts.append(price_axia3 * shares_axia3)
-                if pd.notna(price_axia7) and pd.notna(shares_axia7):
-                    parts.append(price_axia7 * shares_axia7)
-                mc = sum(parts) if parts else np.nan
+                # AXIA3 agora usa APENAS:
+                # preço AXIA3 do Yahoo × número de ações AXIA3
+                price = prices.get("AXIA3", np.nan)
+                shares = shares_classes["AXIA3"]
+                mc = price * shares if (pd.notna(price) and pd.notna(shares)) else np.nan
 
             else:
                 price = prices.get(t, np.nan)
@@ -617,8 +591,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             if t not in df.columns:
                 df[t] = np.nan
 
-        # MUITO IMPORTANTE:
-        # converte as colunas dos tickers para numérico ANTES de escrever o market cap
         for t in resultado.index:
             df[t] = pd.to_numeric(df[t], errors="coerce")
 
@@ -645,7 +617,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         ytm_df = pd.DataFrame.from_dict(irr_results, orient="index", columns=["irr"])
         ytm_df["irr_aj"] = ytm_df["irr"]
 
-        # Ajuste para IRR real (shopping / real estate; AXIA3 fica nominal, sem deflacionar)
+        # Ajuste para IRR real apenas em shopping / real estate
         for t in ["MULT3", "ALOS3", "IGTI11"]:
             if t in ytm_df.index and not pd.isna(ytm_df.loc[t, "irr"]):
                 ytm_df.loc[t, "irr_aj"] = ((1 + ytm_df.loc[t, "irr"]) / (1 + 0.045)) - 1
@@ -660,7 +632,12 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         else:
             engi_irr_pct = np.nan
 
-        show_engi11 = (engi_method_cap11 is True) and (pd.notna(engi_irr_pct) and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT)
+        show_engi11 = (
+            engi_method_cap11 is True
+            and pd.notna(engi_irr_pct)
+            and engi_irr_pct >= THRESH_ENGI_MIN_IRR_PCT
+        )
+
         if not show_engi11:
             drop_list.append("ENGI11")
 
@@ -685,6 +662,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 marker=dict(color=bar_colors, line=dict(width=0)),
                 hovertemplate="<b>%{x}</b><br>%{y:.2f}%<extra></extra>",
             ))
+
             fig.update_traces(
                 textposition="outside",
                 cliponaxis=False,
@@ -721,6 +699,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
                 showlegend=False,
                 height=560,
             )
+
             st.plotly_chart(fig, use_container_width=True)
 
         # ====== Duration ======
@@ -759,11 +738,14 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         st.markdown(build_price_table_html(tbl), unsafe_allow_html=True)
 
         engi_status = "ENGI11 exibida (cap_11 e IRR ≥ 4%)" if show_engi11 else "ENGI11 ocultada (sem cap_11 ou IRR < 4%)"
+
         st.markdown(
             "<div class='footer-note'>💡 Se o Yahoo bloquear, o app mantém o último cache salvo. Use “Atualizar preços” para tentar novamente.</div>",
             unsafe_allow_html=True
         )
+
         st.caption(f"ENGI total calculado via: {engi_calc_source} • {engi_status}")
+        st.caption("AXIA3 calculada via: AXIA3 price × AXIA3 shares apenas.")
 
     except Exception as e:
         st.error(f"❌ Erro: {str(e)}")
@@ -771,7 +753,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
