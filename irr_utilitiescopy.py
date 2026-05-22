@@ -522,7 +522,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "EGIE3": 1_142_300_000,
             "MULT3": 513_164_000,
             "ALOS3": 542_937_000,
-            "AXIA3": 2_028_500_000,
+            "AXIA3": 2_915_430_000,
             "AXIA6": 279_000_000,
             "AXIA7": 606_750_000,
         }
