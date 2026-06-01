@@ -505,7 +505,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "ENGI4": 1_402_193_416,
             "ENGI11": 502_800_000,
             "EQTL3": 1_255_510_000,
-            "SBSP3": 3_524_653_000_0,
+            "SBSP3": 3_524_653_000,
             "NEOE3": 1_213_800_000,
             "ENEV3": 1_936_970_000,
             "ELET3": 2_308_630_000,
