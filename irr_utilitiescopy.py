@@ -514,7 +514,8 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "ALOS3": 542_937_000,
             "AXIA3": 2_635_000_000,
             "AXIA6": 279_000_000,
-            "AXIA7": 606_750_000,
+            "AXIA7": 606_750_000
+            "CSMG3": 380253000,
         }
 
         shares_series = pd.Series(shares_classes).reindex(prices.index)
