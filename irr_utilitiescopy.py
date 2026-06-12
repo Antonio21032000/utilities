@@ -450,6 +450,13 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     cached_prices, cached_meta = load_last_prices()
     has_cache = cached_prices is not None and cached_meta is not None
 
+    # Tickers novos que ainda não existem no cache salvo (ex.: CSMG3 recém-adicionado).
+    # Se houver algum, força o fetch automaticamente — senão eles ficam NaN
+    # e somem do gráfico até alguém clicar em "Atualizar preços".
+    missing_in_cache = []
+    if has_cache:
+        missing_in_cache = [t for t in tickers_for_prices if t not in cached_prices.index]
+
     colA, colB = st.columns([1.2, 4.8])
     with colA:
         refresh = st.button("🔄 Atualizar preços agora", use_container_width=True)
@@ -470,11 +477,18 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         prices_series = pd.Series(index=tickers_for_prices, dtype="float64", name="preco")
         meta = pd.DataFrame(index=tickers_for_prices, data={"Fonte": "N/A", "Timestamp": pd.NaT})
 
-    need_fetch = refresh or (not has_cache)
+    need_fetch = refresh or (not has_cache) or len(missing_in_cache) > 0
 
     status_box = st.empty()
     if need_fetch:
-        status_box.info("Baixando preços do Yahoo Finance (timeout ~10s)...")
+        if missing_in_cache and not refresh:
+            status_box.info(
+                f"Tickers novos fora do cache ({', '.join(missing_in_cache)}). "
+                "Baixando preços do Yahoo Finance (timeout ~10s)..."
+            )
+        else:
+            status_box.info("Baixando preços do Yahoo Finance (timeout ~10s)...")
+
         with st.spinner("Carregando..."):
             prices_new, meta_new, stt = fetch_prices_yahoo_safe(tickers_for_prices, max_total_seconds=10)
 
@@ -644,6 +658,10 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
         ytm_plot = ytm_clean[~ytm_clean.index.isin(drop_list)]
 
+        # Aviso se CSMG3 ficou sem IRR (ex.: preço indisponível)
+        if "CSMG3" in ytm_df.index and pd.isna(ytm_df.loc["CSMG3", "irr"]):
+            st.warning("CSMG3 sem IRR calculada (preço indisponível). Clique em “Atualizar preços agora”.")
+
         # ====== Gráfico ======
         if len(ytm_plot) == 0:
             st.warning("Nenhum ticker disponível para o gráfico de IRR após os filtros.")
@@ -754,7 +772,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
