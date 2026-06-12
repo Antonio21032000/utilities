@@ -170,6 +170,26 @@ def format_ts_brt(ts) -> str:
         return ""
 
 
+def latest_price_ts(meta_df) -> str:
+    """Retorna (formatado em BRT) o timestamp mais recente entre os preços usados."""
+    try:
+        if meta_df is None or "Timestamp" not in meta_df.columns:
+            return ""
+        best = None
+        for v in meta_df["Timestamp"]:
+            t = pd.to_datetime(v, errors="coerce")
+            if pd.isna(t):
+                continue
+            if getattr(t, "tzinfo", None) is None:
+                t = t.tz_localize("UTC")
+            t = t.tz_convert("UTC")
+            if best is None or t > best:
+                best = t
+        return format_ts_brt(best) if best is not None else ""
+    except Exception:
+        return ""
+
+
 # =========================================================
 # Excel helpers
 # =========================================================
@@ -385,6 +405,12 @@ header[data-testid="stHeader"]{box-shadow:none !important;}
   filter:drop-shadow(0 1px 0 rgba(0,0,0,.10));}
 .app-header h1{margin:0; color:var(--stk-header-fg); font-weight:800; letter-spacing:.4px;}
 
+.stk-updated{position:absolute; right:16px; top:50%; transform:translateY(-50%);
+  text-align:right; color:var(--stk-header-fg); font-size:.8rem; font-weight:600;
+  opacity:.9; line-height:1.3;}
+.stk-updated .lbl{opacity:.7;}
+.stk-updated .val{font-weight:700; color:var(--stk-gold); font-variant-numeric:tabular-nums; white-space:nowrap;}
+
 .footer-note{background:var(--stk-note-bg); border:1px solid var(--stk-note-bd); border-radius:10px; padding:16px 18px;
   color:var(--stk-note-fg); text-align:center; margin:18px 0 8px; font-size:1.1rem; font-weight:600; width:100%;}
 
@@ -418,26 +444,35 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 </style>
 """, unsafe_allow_html=True)
 
-    # Header com logo
+    # Header com logo (placeholder: o timestamp só é conhecido depois do load/fetch)
     LOGO_PATH = "STKGRAFICO.png"
     logo_b64 = None
     if os.path.exists(LOGO_PATH):
         with open(LOGO_PATH, "rb") as f:
             logo_b64 = base64.b64encode(f.read()).decode("utf-8")
 
-    if logo_b64:
-        st.markdown(
-            "<div class='app-header'><div class='header-inner'>"
+    header_box = st.empty()
+
+    def render_header(last_update_str: str = ""):
+        logo_html = (
             f"<img class='stk-logo' src='data:image/png;base64,{logo_b64}' alt='STK'/>"
-            "<h1>IRR Real</h1>"
+            if logo_b64 else ""
+        )
+        upd_html = (
+            "<div class='stk-updated'>"
+            "<span class='lbl'>Último preço puxado</span><br>"
+            f"<span class='val'>{last_update_str} BRT</span>"
+            "</div>"
+            if last_update_str else ""
+        )
+        header_box.markdown(
+            "<div class='app-header'><div class='header-inner'>"
+            f"{logo_html}<h1>IRR Real</h1>{upd_html}"
             "</div></div>",
             unsafe_allow_html=True,
         )
-    else:
-        st.markdown(
-            "<div class='app-header'><div class='header-inner'><h1>IRR Real</h1></div></div>",
-            unsafe_allow_html=True,
-        )
+
+    render_header()
 
     # ====== Tickers puxados do Yahoo ======
     tickers_for_prices = [
@@ -506,6 +541,9 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             else:
                 msg += " (erro)"
             status_box.warning(msg + " Mantendo o último cache disponível.")
+
+    # Re-renderiza o header com o timestamp mais recente dos preços usados
+    render_header(latest_price_ts(meta))
 
     try:
         prices = pd.to_numeric(prices_series, errors="coerce").astype(float)
@@ -772,7 +810,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
 
 
 
