@@ -443,7 +443,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
     tickers_for_prices = [
         "CPLE3", "IGTI3", "IGTI4", "ENGI3", "ENGI4", "ENGI11",
         "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-        "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7",
+        "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7", "CSMG3",
     ]
 
     # ====== Cache ======
@@ -515,7 +515,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
             "AXIA3": 2_635_000_000,
             "AXIA6": 279_000_000,
             "AXIA7": 606_750_000,
-            "CSMG3": 380253000,
+            "CSMG3": 380_253_000,
         }
 
         shares_series = pd.Series(shares_classes).reindex(prices.index)
@@ -553,7 +553,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         # ====== Tabela final para XIRR ======
         final_tickers = [
             "CPLE3", "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-            "MULT3", "ALOS3", "AXIA3", "IGTI11", "ENGI11",
+            "MULT3", "ALOS3", "AXIA3", "IGTI11", "ENGI11", "CSMG3",
         ]
 
         rows = []
@@ -725,7 +725,7 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
         order = [
             "CPLE3", "IGTI3", "IGTI4", "ENGI3", "ENGI4", "ENGI11",
             "EQTL3", "SBSP3", "NEOE3", "ENEV3", "ELET3", "EGIE3",
-            "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7"
+            "MULT3", "ALOS3", "AXIA3", "AXIA6", "AXIA7", "CSMG3"
         ]
 
         tbl = pd.DataFrame({"Preço": prices.reindex(order)})
@@ -754,9 +754,6 @@ svg text{font-family:Inter, system-ui, sans-serif !important;}
 
 if __name__ == "__main__":
     main()
-
-
-
 
 
 
